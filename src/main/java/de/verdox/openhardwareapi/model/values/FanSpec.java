@@ -1,0 +1,20 @@
+package de.verdox.openhardwareapi.model.values;
+
+import jakarta.persistence.Embeddable;
+import jakarta.validation.constraints.Positive;
+import lombok.*;
+
+@Embeddable
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString
+public class FanSpec {
+    @Positive
+    private Integer diameterMm; // z.B. 120
+    @Positive
+    private Integer rpmMax; // max. Drehzahl
+    @Positive
+    private Integer count; // Anzahl Lüfter
+}
