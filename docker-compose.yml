@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pcparts
+      POSTGRES_USER: pcparts
+      POSTGRES_PASSWORD: pcparts
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  selenium:
+    image: selenium/standalone-all-browsers:latest
+    shm_size: 2g
+    ports:
+      - "4444:4444"   # WebDriver
+    volumes:
+      - ./open-hardware-api/chrome-profile:/home/seluser/profile
+    environment:
+      - SE_NODE_MAX_SESSIONS=16
+
+  app:
+    image: verdox/open-hardware-api:latest
+    depends_on:
+      - db
+      - selenium
+    user: "0:1000"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/pcparts
+      SPRING_DATASOURCE_USERNAME: pcparts
+      SPRING_DATASOURCE_PASSWORD: pcparts
+      SELENIUM_REMOTE_URL: http://selenium:4444/wd/hub
+    ports:
+      - "5050:8080"
+    volumes:
+      - ./open-hardware-api:/data
+
+volumes:
+  db-data:
