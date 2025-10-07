@@ -1,0 +1,9 @@
+package de.verdox.openhardwareapi.component.repository;
+
+import de.verdox.openhardwareapi.model.Motherboard;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface MotherboardRepository extends HardwareSpecificRepo<Motherboard> {
+
+}
