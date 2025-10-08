@@ -22,6 +22,9 @@ jobs:
           server-id: verdox-snapshots          # MUSS zu <id> im snapshotRepository passen
           server-username: REPO_USER           # Name des GitHub Secrets (ohne ${})
           server-password: REPO_PASSWORD       # Name des GitHub Secrets (ohne ${})
+        env:
+          REPO_USER: ${{ secrets.REPO_USER }}          # hier wird die Env-Var befüllt
+          REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
 
       - name: Build & Deploy SNAPSHOT
         run: mvn -B -U clean deploy -DskipTests
