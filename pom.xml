@@ -152,11 +152,11 @@
     <distributionManagement>
         <repository>
             <id>verdox-releases</id>
-            <url>https://repo.verdox.de/#/releases</url>
+            <url>https://repo.verdox.de/releases</url>
         </repository>
         <snapshotRepository>
             <id>verdox-snapshots</id>
-            <url>https://repo.verdox.de/#/snapshots</url>
+            <url>https://repo.verdox.de/snapshots</url>
         </snapshotRepository>
     </distributionManagement>
 
