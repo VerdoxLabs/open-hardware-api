@@ -1,0 +1,53 @@
+name: Publish package verdox repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_OPTS: "-Xmx1g"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Settings mit Deploy-Credentials schreiben (IDs müssen zu distributionManagement passen)
+      - name: Configure Maven settings.xml
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml << 'EOF'
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>reposilite-releases</id>
+                <username>${env.REPO_USER}</username>
+                <password>${env.REPO_PASSWORD}</password>
+              </server>
+              <server>
+                <id>reposilite-snapshots</id>
+                <username>${env.REPO_USER}</username>
+                <password>${env.REPO_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+        env:
+          REPO_USER: ${{ secrets.REPO_USER }}
+          REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
+
+      # Falls deine API ein Submodul ist, passe -pl/-am an; sonst genügt "mvn deploy" im API-Ordner
+      - name: Build & Deploy
+        run: |
+          # Variante 1: API hat eigenes Maven-Projekt (führe im API-Ordner aus)
+          # cd open-hardware-api/client
+          mvn -B -U clean deploy -DskipTests

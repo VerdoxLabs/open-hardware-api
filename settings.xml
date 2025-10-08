@@ -1,0 +1,14 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+    <servers>
+        <server>
+            <id>reposilite-releases</id>
+            <username>DEPLOY_USER_ODER_TOKEN_NAME</username>
+            <password>DEPLOY_PASSWORD_ODER_TOKEN_VALUE</password>
+        </server>
+        <server>
+            <id>reposilite-snapshots</id>
+            <username>DEPLOY_USER_ODER_TOKEN_NAME</username>
+            <password>DEPLOY_PASSWORD_ODER_TOKEN_VALUE</password>
+        </server>
+    </servers>
+</settings>
