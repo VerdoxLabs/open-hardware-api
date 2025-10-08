@@ -23,9 +23,5 @@ jobs:
           server-username: REPO_USER           # Name des GitHub Secrets (ohne ${})
           server-password: REPO_PASSWORD       # Name des GitHub Secrets (ohne ${})
 
-      # Optional (schneller, lädt Dependencies vor)
-      - name: Go offline (optional)
-        run: mvn -B -U -q dependency:go-offline
-
       - name: Build & Deploy SNAPSHOT
         run: mvn -B -U clean deploy -DskipTests
