@@ -26,5 +26,27 @@ jobs:
           REPO_USER: ${{ secrets.REPO_USER }}          # hier wird die Env-Var befüllt
           REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
 
+      # 2) DEBUG: settings.xml anzeigen (NIE Passwörter loggen -> setup-java maskiert sie automatisch)
+      - name: Show effective Maven settings.xml
+        run: |
+          echo "===== ~/.m2/settings.xml ====="
+          cat ~/.m2/settings.xml || true
+
+      # 3) DEBUG: URL-Check mit denselben Credentials
+      - name: Check Reposilite endpoint with curl
+        env:
+          REPO_USER: ${{ secrets.REPO_USER }}
+          REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
+        run: |
+          set -e
+          echo "HEAD https://repo.verdox.de/snapshots"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "${REPO_USER}:${REPO_PASSWORD}" -I https://repo.verdox.de/snapshots || true)
+          echo "HTTP ${HTTP_CODE}"
+          # 200/401/403 sind ok-ish; 404/000 -> URL falsch / Netzproblem
+          if [ "${HTTP_CODE}" = "404" ] || [ "${HTTP_CODE}" = "000" ]; then
+            echo "Die URL https://repo.verdox.de/snapshots scheint nicht korrekt erreichbar zu sein."
+            exit 1
+          fi
+
       - name: Build & Deploy SNAPSHOT
         run: mvn -B -U clean deploy -DskipTests
