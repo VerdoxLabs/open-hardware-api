@@ -6,20 +6,19 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.WebRequest;
 
 import java.time.Duration;
-import java.time.OffsetDateTime;
+import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Set;
@@ -29,6 +28,35 @@ import java.util.Set;
 @RequestMapping("/api/v1/specs")
 public class APIHardwareController {
     private final HardwareSpecService hardwareSpecService;
+
+    @RequestMapping(path = "/{type}", method = RequestMethod.HEAD)
+    @Transactional(readOnly = true)
+    public <HARDWARE extends HardwareSpec> ResponseEntity<Void> head(
+            @PathVariable String type,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        if (!hardwareSpecService.isValidType(type)) {
+            throw new IllegalArgumentException("Invalid type:" + type);
+        }
+        if (!hardwareSpecService.isValidType(type)) {
+            throw new IllegalArgumentException("Invalid type:" + type);
+        }
+        Class<HARDWARE> hardwareType = (Class<HARDWARE>) hardwareSpecService.getType(type);
+        JpaRepository<HARDWARE, Long> repo = hardwareSpecService.getRepo(hardwareType);
+        if (repo == null) {
+            throw new IllegalStateException("No repo found for type: " + type);
+        }
+
+        long totalElements = repo.count();
+        int pageSize = Math.max(1, size);
+        int totalPages = totalElements == 0 ? 0 : (int) Math.ceil((double) totalElements / pageSize);
+
+        HttpHeaders h = new HttpHeaders();
+        h.add("X-Total-Elements", String.valueOf(totalElements));
+        h.add("X-Total-Pages", String.valueOf(totalPages));
+        h.add("X-Page-Size", String.valueOf(pageSize));
+        return new ResponseEntity<>(h, HttpStatus.NO_CONTENT);
+    }
 
     @GetMapping("/{type}")
     @Transactional(readOnly = true)
@@ -50,17 +78,16 @@ public class APIHardwareController {
 
         String etag = "\"" + page.getTotalElements() + ":" +
                 page.getContent().stream()
-                        .map(HardwareSpec::getUpdatedAt)
+                        .map(HardwareSpec::getLaunchDate)
                         .filter(Objects::nonNull)
                         .max(Comparator.naturalOrder())
-                        .orElse(OffsetDateTime.now());
+                        .orElse(LocalDate.now());
 
         if (request.checkNotModified(etag))
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).build();
 
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic())
-                .eTag(etag)
                 .body(page);
 
     }

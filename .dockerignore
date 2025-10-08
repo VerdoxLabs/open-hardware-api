@@ -1,0 +1,10 @@
+target
+node_modules
+frontend/generated
+.idea
+.vscode
+.git
+.gitignore
+.DS_Store
+/data
+/open-hardware-api

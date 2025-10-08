@@ -16,6 +16,8 @@
     <packaging>pom</packaging>
     <modules>
         <module>client</module>
+        <module>server</module>
+        <module>spring-db</module>
     </modules>
     <url/>
     <licenses>
@@ -44,6 +46,11 @@
             <dependency>
                 <groupId>de.verdox.open-hardware-api</groupId>
                 <artifactId>server</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>de.verdox.open-hardware-api</groupId>
+                <artifactId>spring-db</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
@@ -156,19 +163,6 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
-
 </project>

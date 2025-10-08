@@ -28,15 +28,19 @@ CREATE TABLE cooler_supported_sockets
 
 CREATE TABLE cpu
 (
-    id                  BIGINT           NOT NULL,
-    socket              VARCHAR(255)     NOT NULL,
-    integrated_graphics VARCHAR(255),
-    cores               INTEGER          NOT NULL,
-    threads             INTEGER          NOT NULL,
-    base_clock_mhz      DOUBLE PRECISION NOT NULL,
-    boost_clock_mhz     DOUBLE PRECISION NOT NULL,
-    l3cache_mb          INTEGER          NOT NULL,
-    tdp_watts           INTEGER          NOT NULL,
+    id                         BIGINT           NOT NULL,
+    socket                     VARCHAR(255)     NOT NULL,
+    integrated_graphics        VARCHAR(255),
+    cores                      INTEGER          NOT NULL,
+    efficiency_cores           INTEGER          NOT NULL,
+    performance_cores          INTEGER          NOT NULL,
+    threads                    INTEGER          NOT NULL,
+    base_clock_mhz             DOUBLE PRECISION NOT NULL,
+    base_clock_mhz_efficiency  DOUBLE PRECISION NOT NULL,
+    base_clock_mhz_performance DOUBLE PRECISION NOT NULL,
+    boost_clock_mhz            DOUBLE PRECISION NOT NULL,
+    l3cache_mb                 INTEGER          NOT NULL,
+    tdp_watts                  INTEGER          NOT NULL,
     CONSTRAINT pk_cpu PRIMARY KEY (id)
 );
 
@@ -115,8 +119,6 @@ CREATE TABLE hardware_spec
     mpn          VARCHAR(255),
     upc          VARCHAR(255),
     launch_date  date,
-    created_at   TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-    updated_at   TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     CONSTRAINT pk_hardwarespec PRIMARY KEY (id)
 );
 
@@ -273,10 +275,10 @@ ALTER TABLE gpu_power_connectors
     ADD CONSTRAINT fk_gpu_power_connectors_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
 
 ALTER TABLE hardware_spec_attributes
-    ADD CONSTRAINT fk_hardware_spec_attributes_on_hardware_spec FOREIGN KEY (spec_id) REFERENCES hardware_spec (id);
+    ADD CONSTRAINT fk_hardware_spec_attributes_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
 
 ALTER TABLE hardware_spec_tags
-    ADD CONSTRAINT fk_hardware_spec_tags_on_hardware_spec FOREIGN KEY (spec_id) REFERENCES hardware_spec (id);
+    ADD CONSTRAINT fk_hardware_spec_tags_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
 
 ALTER TABLE m2slots
     ADD CONSTRAINT fk_m2slots_on_motherboard FOREIGN KEY (spec_id) REFERENCES motherboard (id);

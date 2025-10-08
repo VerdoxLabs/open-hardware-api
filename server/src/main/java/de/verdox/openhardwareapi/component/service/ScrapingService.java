@@ -4,9 +4,9 @@ package de.verdox.openhardwareapi.component.service;
 import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
 import de.verdox.openhardwareapi.io.gpu.DPGPUScraper;
 import de.verdox.openhardwareapi.io.pc_combo_scraper.*;
-import de.verdox.openhardwareapi.io.shops.alternate.AlternateScrapers;
-import de.verdox.openhardwareapi.io.shops.caseking.CaseKingScrapers;
-import de.verdox.openhardwareapi.io.shops.mindfactory.MindfactoryScrapers;
+import de.verdox.openhardwareapi.io.websites.alternate.AlternateScrapers;
+import de.verdox.openhardwareapi.io.websites.caseking.CaseKingScrapers;
+import de.verdox.openhardwareapi.io.websites.mindfactory.MindfactoryScrapers;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import jakarta.annotation.PostConstruct;
 import org.springframework.scheduling.TaskScheduler;
@@ -80,6 +80,15 @@ public class ScrapingService {
 
     private List<ComponentWebScraper<? extends HardwareSpec>> setupScrapers() {
         return List.of(
+                CaseKingScrapers.forCPU(hardwareSpecService),
+                CaseKingScrapers.forGPU(hardwareSpecService),
+                CaseKingScrapers.forRAM(hardwareSpecService),
+                CaseKingScrapers.forCase(hardwareSpecService),
+                CaseKingScrapers.forHDD(hardwareSpecService),
+                CaseKingScrapers.forSSD(hardwareSpecService),
+                CaseKingScrapers.forPSU(hardwareSpecService),
+                CaseKingScrapers.forMotherboard(hardwareSpecService),
+
                 AlternateScrapers.forCPU(hardwareSpecService),
                 AlternateScrapers.forGPU(hardwareSpecService),
                 AlternateScrapers.forRAM(hardwareSpecService),
@@ -89,15 +98,6 @@ public class ScrapingService {
                 AlternateScrapers.forM2SSD(hardwareSpecService),
                 AlternateScrapers.forPSU(hardwareSpecService),
                 AlternateScrapers.forMotherboard(hardwareSpecService),
-
-                CaseKingScrapers.forCPU(hardwareSpecService),
-                CaseKingScrapers.forGPU(hardwareSpecService),
-                CaseKingScrapers.forRAM(hardwareSpecService),
-                CaseKingScrapers.forCase(hardwareSpecService),
-                CaseKingScrapers.forHDD(hardwareSpecService),
-                CaseKingScrapers.forSSD(hardwareSpecService),
-                CaseKingScrapers.forPSU(hardwareSpecService),
-                CaseKingScrapers.forMotherboard(hardwareSpecService),
 
                 new DPGPUScraper(hardwareSpecService),
                 new CPUKomboScraper(hardwareSpecService),

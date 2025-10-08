@@ -1,8 +1,0 @@
-server:
-  port: ${SERVER_PORT:${PORT:8080}}
-  forward-headers-strategy: framework
-  address: 0.0.0.0
-
-logging:
-  level:
-    org.atmosphere: warn

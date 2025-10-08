@@ -1,0 +1,135 @@
+package de.verdox.openhardwareapi.io.websites.caseking;
+
+import de.verdox.openhardwareapi.component.service.ScrapingService;
+import de.verdox.openhardwareapi.io.api.SinglePageHardwareScraper;
+import de.verdox.openhardwareapi.model.HardwareSpec;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.select.Elements;
+
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class AbstractSingleCasekingScraper<HARDWARE extends HardwareSpec> extends SinglePageHardwareScraper<HARDWARE> {
+    public AbstractSingleCasekingScraper(String mindFactoryUrl, HardwareQuery<HARDWARE> query) {
+        super(mindFactoryUrl, query);
+    }
+
+    @Override
+    protected void parsePageToSpecs(Document page, Map<String, List<String>> specs) throws Throwable {
+        parseSpecificationsIfPossible(page, specs);
+
+        if (specs.containsKey("Typ") && !specs.get("Typ").isEmpty()) {
+            specs.put("model", specs.get("Typ"));
+        } else {
+            String model = page.selectFirst("h1.product-name").text().split(",")[0];
+            specs.put("model", List.of(model));
+        }
+
+
+        for (Element specLv1 : page.selectFirst("#product-detail-content-accordion-body-id-specification").selectFirst("div.table-responsive").select("tr.spec-lvl-1")) {
+            var elements = specLv1.select("td");
+            specs.put(elements.get(0).text(), List.of(elements.get(1).text().replace("Ja", "true").replace("Nein", "false")));
+        }
+
+        for (Element specLv2 : page.selectFirst("#product-detail-content-accordion-body-id-specification").selectFirst("div.table-responsive").select("tr.spec-lvl-2")) {
+            var elements = specLv2.select("td");
+            specs.put(elements.get(0).text(), List.of(elements.get(1).text().replace("Ja", "true").replace("Nein", "false")));
+        }
+
+        for (Element specLv3 : page.selectFirst("#product-detail-content-accordion-body-id-specification").selectFirst("div.table-responsive").select("tr.spec-lvl-3")) {
+            var elements = specLv3.select("td");
+            specs.put(elements.get(0).text(), List.of(elements.get(1).text().replace("Ja", "true").replace("Nein", "false")));
+        }
+
+        Elements productAttributes = page.select("div.product-attributes");
+        for (Element productAttribute : productAttributes) {
+            for (Element element : productAttribute.select("div.d-inline-block")) {
+                String label = element.select("span.product-attributes-label").text();
+                String value = element.select("span.product-attributes-value").text();
+
+                if (label.equalsIgnoreCase("hersteller")) {
+                    specs.put("Hersteller", List.of(value));
+                }
+            }
+        }
+    }
+
+    private static void parseSpecificationsIfPossible(Document page, Map<String, List<String>> specs) {
+        Pattern KV = Pattern.compile("^\\s*([^:]+)\\s*:\\s*(.+)\\s*$");
+
+        for (Element specificationDiv : page.select("div.specification")) {
+            for (Element li : specificationDiv.select("li")) {
+                Element b = li.selectFirst("> b");
+                if (b == null) continue;
+
+                String mainKey = b.text().replaceFirst(":\\s*$", "").trim();
+
+                // --- Zeilen nach dem <b> sammeln (mit oder ohne <br>) ---
+                List<String> lines = new ArrayList<>();
+                StringBuilder cur = new StringBuilder();
+
+                for (Node n : li.childNodes()) {
+                    if (n == b) continue;                  // Label überspringen
+                    if (n.nodeName().equalsIgnoreCase("br")) {
+                        String s = Jsoup.parse(cur.toString()).text().trim();
+                        if (!s.isEmpty()) lines.add(s);
+                        cur.setLength(0);
+                    } else {
+                        cur.append(n.outerHtml());         // Text/Inline-Tags anhängen
+                    }
+                }
+                String tail = Jsoup.parse(cur.toString()).text().trim();
+                if (!tail.isEmpty()) lines.add(tail);
+
+                // --- Zeilen in Map einsortieren ---
+                List<String> mainValues = new ArrayList<>();
+                for (String t : lines) {
+                    Matcher m = KV.matcher(t);
+                    if (m.matches()) {
+                        String k = m.group(1).trim();
+                        String v = m.group(2).trim();
+                        specs.computeIfAbsent(k, __ -> new ArrayList<>()).add(v);
+                    } else {
+                        mainValues.add(t);
+                    }
+                }
+                if (!mainValues.isEmpty()) {
+                    specs.computeIfAbsent(mainKey, __ -> new ArrayList<>()).addAll(mainValues);
+                }
+            }
+        }
+    }
+
+    @Override
+    protected void translateSpecsToTarget(Map<String, List<String>> specs, HARDWARE target) {
+        target.setManufacturer(specs.get("Hersteller").getFirst());
+        target.setModel(specs.get("model").getFirst());
+    }
+
+    @Override
+    protected void extractNumbers(Document page, String[] numbers, Map<String, List<String>> specs) {
+        String EAN = "";
+        String MPN = "";
+        Elements productAttributes = page.select("div.product-attributes");
+        for (Element productAttribute : productAttributes) {
+            for (Element element : productAttribute.select("div.d-inline-block")) {
+                String label = element.select("span.product-attributes-label").text();
+                String value = element.select("span.product-attributes-value").text();
+
+                if (label.equals("EAN")) {
+                    EAN = value;
+                }
+
+                if (label.equals("MPN")) {
+                    MPN = value;
+                }
+            }
+        }
+        setEAN(EAN, numbers);
+        setMPN(MPN, numbers);
+    }
+}

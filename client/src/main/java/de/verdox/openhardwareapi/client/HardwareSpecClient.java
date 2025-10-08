@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.verdox.openhardwareapi.model.CPU;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -263,6 +264,63 @@ public final class HardwareSpecClient {
             throw new RuntimeException("Cannot parse page response: " + new String(bytes, StandardCharsets.UTF_8), e);
         }
     }
+
+    // ===== Transport-Typ =====
+    public record PagesMeta(long totalElements, int pageSize, int totalPages) {}
+
+    // ===== Public API =====
+    public PagesMeta pages(String type, int size) {
+        // 1) HEAD /specs/{type}?size=...
+        String headUri = uriBuilder("/specs/{type}", b -> b.queryParam("size", size), type);
+
+        return http.method(org.springframework.http.HttpMethod.HEAD)
+                .uri(headUri)
+                .exchangeToMono(resp -> {
+                    HttpStatus status = HttpStatus.resolve(resp.statusCode().value());
+                    if (status.is2xxSuccessful() || status == HttpStatus.NO_CONTENT) {
+                        HttpHeaders h = resp.headers().asHttpHeaders();
+                        long totalElements = parseLongHeader(h, "X-Total-Elements", -1L);
+                        int totalPages    = parseIntHeader(h, "X-Total-Pages", -1);
+                        int pageSize      = parseIntHeader(h, "X-Page-Size", size);
+
+                        if (totalElements >= 0 && totalPages >= 0) {
+                            return Mono.just(new PagesMeta(totalElements, pageSize, totalPages));
+                        }
+                        // Server liefert HEAD ohne Header? -> Fallback auf GET
+                        return fetchPagesMetaViaGet(type, size);
+                    }
+                    // Fallback auf GET bei 404/405 etc.
+                    if (status == HttpStatus.NOT_FOUND || status == HttpStatus.METHOD_NOT_ALLOWED) {
+                        return fetchPagesMetaViaGet(type, size);
+                    }
+                    return toProblem(resp).flatMap(Mono::error);
+                })
+                .block();
+    }
+
+    // ===== Fallback GET /specs/{type}/pages?size=... =====
+    private Mono<PagesMeta> fetchPagesMetaViaGet(String type, int size) {
+        String getUri = uriBuilder("/specs/{type}/pages", b -> b.queryParam("size", size), type);
+        return http.get()
+                .uri(getUri)
+                .retrieve()
+                .onStatus(s -> !s.is2xxSuccessful(), this::toProblem)
+                .bodyToMono(com.fasterxml.jackson.databind.JsonNode.class)
+                .map(n -> new PagesMeta(
+                        n.path("totalElements").asLong(-1),
+                        n.path("pageSize").asInt(size),
+                        n.path("totalPages").asInt(-1)
+                ));
+    }
+
+    // ===== kleine Header-Parser =====
+    private static long parseLongHeader(HttpHeaders h, String name, long def) {
+        try { return Long.parseLong(h.getFirst(name)); } catch (Exception e) { return def; }
+    }
+    private static int parseIntHeader(HttpHeaders h, String name, int def) {
+        try { return Integer.parseInt(h.getFirst(name)); } catch (Exception e) { return def; }
+    }
+
 
     /* ======== Transport-Datentypen (leichtgewichtig) ======== */
 

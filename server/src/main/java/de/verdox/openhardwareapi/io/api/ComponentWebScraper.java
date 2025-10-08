@@ -113,10 +113,10 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
                 }
 
             } else {
-                //ScrapingService.LOGGER.log(Level.WARNING, "GPU not in database: " + base.name() + " -> " + parsedGpu.canonical());
+                ScrapingService.LOGGER.log(Level.FINER, "GPU not in database: " + gpuName + " -> " + parsedGpu.canonical());
             }
         } else {
-            ScrapingService.LOGGER.log(Level.WARNING, "No canonical name found: " + gpuName);
+            ScrapingService.LOGGER.log(Level.FINER, "No canonical name found: " + gpuName);
         }
         return null;
     }
