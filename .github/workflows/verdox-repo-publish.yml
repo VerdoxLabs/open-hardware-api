@@ -3,7 +3,7 @@ name: Publish package verdox repo
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
@@ -45,9 +45,6 @@ jobs:
           REPO_USER: ${{ secrets.REPO_USER }}
           REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
 
-      # Falls deine API ein Submodul ist, passe -pl/-am an; sonst genügt "mvn deploy" im API-Ordner
       - name: Build & Deploy
         run: |
-          # Variante 1: API hat eigenes Maven-Projekt (führe im API-Ordner aus)
-          # cd open-hardware-api/client
           mvn -B -U clean deploy -DskipTests
