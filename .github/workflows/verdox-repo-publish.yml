@@ -3,7 +3,7 @@ name: Publish package verdox repo
 on:
   push:
     branches:
-      - master
+      - master  
 
 jobs:
   deploy:
