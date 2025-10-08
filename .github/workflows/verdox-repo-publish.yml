@@ -1,9 +1,8 @@
-name: Publish package verdox repo
+name: Publish SNAPSHOT to Verdox Reposilite
 
 on:
   push:
-    branches:
-      - master  
+    branches: [ master ]     # oder main – Hauptsache eure SNAPSHOTs landen hier
 
 jobs:
   deploy:
@@ -14,37 +13,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK + Maven server creds
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
+          server-id: verdox-snapshots          # MUSS zu <id> im snapshotRepository passen
+          server-username: REPO_USER           # Name des GitHub Secrets (ohne ${})
+          server-password: REPO_PASSWORD       # Name des GitHub Secrets (ohne ${})
 
-      # Settings mit Deploy-Credentials schreiben (IDs müssen zu distributionManagement passen)
-      - name: Configure Maven settings.xml
-        run: |
-          mkdir -p ~/.m2
-          cat > ~/.m2/settings.xml << 'EOF'
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
-            <servers>
-              <server>
-                <id>reposilite-releases</id>
-                <username>${env.REPO_USER}</username>
-                <password>${env.REPO_PASSWORD}</password>
-              </server>
-              <server>
-                <id>reposilite-snapshots</id>
-                <username>${env.REPO_USER}</username>
-                <password>${env.REPO_PASSWORD}</password>
-              </server>
-            </servers>
-          </settings>
-          EOF
-        env:
-          REPO_USER: ${{ secrets.REPO_USER }}
-          REPO_PASSWORD: ${{ secrets.REPO_PASSWORD }}
+      # Optional (schneller, lädt Dependencies vor)
+      - name: Go offline (optional)
+        run: mvn -B -U -q dependency:go-offline
 
-      - name: Build & Deploy
-        run: |
-          mvn -B -U clean deploy -DskipTests
+      - name: Build & Deploy SNAPSHOT
+        run: mvn -B -U clean deploy -DskipTests
