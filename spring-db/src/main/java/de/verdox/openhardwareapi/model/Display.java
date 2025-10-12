@@ -17,7 +17,27 @@ import java.util.Set;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class Display extends HardwareSpec {
+public class Display extends HardwareSpec<Display> {
+
+    @Override
+    public void merge(Display other) {
+        super.merge(other);
+        mergeNumber(other, Display::getRefreshRate, Display::setRefreshRate);
+        mergeEnum(other, Display::getDisplayPanel, Display::setDisplayPanel, HardwareTypes.DisplayPanel.UNKNOWN);
+        mergeSet(other, Display::getDisplaySyncs);
+        mergeNumber(other, Display::getHdmiPorts, Display::setHdmiPorts);
+        mergeNumber(other, Display::getDisplayPorts, Display::setDisplayPorts);
+        mergeNumber(other, Display::getDviPorts, Display::setDviPorts);
+        mergeNumber(other, Display::getVgaPorts, Display::setVgaPorts);
+        mergeNumber(other, Display::getResponseTimeMS, Display::setResponseTimeMS);
+        mergeNumber(other, Display::getInchSize, Display::setInchSize);
+        mergeNumber(other, Display::getResWidth, Display::setResWidth);
+        mergeNumber(other, Display::getResHeight, Display::setResHeight);
+        mergeBool(other, Display::getIntegratedSpeakers, Display::setIntegratedSpeakers);
+        mergeBool(other, Display::getCurved, Display::setCurved);
+        mergeBool(other, Display::getAdjustableSize, Display::setAdjustableSize);
+    }
+
     @PositiveOrZero
     private Integer refreshRate = 0;
 
@@ -62,5 +82,31 @@ public class Display extends HardwareSpec {
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Override
+    public String toString() {
+        return "Display{" +
+                "launchDate=" + launchDate +
+                ", refreshRate=" + refreshRate +
+                ", displayPanel=" + displayPanel +
+                ", displaySyncs=" + displaySyncs +
+                ", hdmiPorts=" + hdmiPorts +
+                ", displayPorts=" + displayPorts +
+                ", dviPorts=" + dviPorts +
+                ", vgaPorts=" + vgaPorts +
+                ", responseTimeMS=" + responseTimeMS +
+                ", inchSize=" + inchSize +
+                ", resWidth=" + resWidth +
+                ", resHeight=" + resHeight +
+                ", integratedSpeakers=" + integratedSpeakers +
+                ", curved=" + curved +
+                ", adjustableSize=" + adjustableSize +
+                ", manufacturer='" + manufacturer + '\'' +
+                ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                '}';
     }
 }

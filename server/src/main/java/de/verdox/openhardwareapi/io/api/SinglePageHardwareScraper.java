@@ -1,86 +1,84 @@
 package de.verdox.openhardwareapi.io.api;
 
 import de.verdox.openhardwareapi.component.service.ScrapingService;
+import de.verdox.openhardwareapi.configuration.DataStorage;
+import de.verdox.openhardwareapi.io.api.selenium.CookieJar;
+import de.verdox.openhardwareapi.io.api.selenium.FScrapingCache;
+import de.verdox.openhardwareapi.io.api.selenium.SeleniumBasedWebScraper;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import lombok.Getter;
 import lombok.Setter;
 import org.jsoup.nodes.Document;
 
-import java.nio.file.Path;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Level;
 
-public abstract class SinglePageHardwareScraper<HARDWARE extends HardwareSpec> implements ComponentWebScraper<HARDWARE> {
+public abstract class SinglePageHardwareScraper<HARDWARE extends HardwareSpec<HARDWARE>> implements ComponentWebScraper<HARDWARE> {
+    private final String id;
     @Setter
     protected String url;
     protected final HardwareQuery<HARDWARE> query;
     @Getter
-    protected final SeleniumBasedWebScraper seleniumBasedWebScraper = new SeleniumBasedWebScraper(new ScrapingCache(Path.of("./data/scraping")), new CookieJar(Path.of("./data/scraping")));
+    protected final SeleniumBasedWebScraper seleniumBasedWebScraper;
 
-    public SinglePageHardwareScraper(String url, HardwareQuery<HARDWARE> query) {
+    public SinglePageHardwareScraper(String id, String url, HardwareQuery<HARDWARE> query) {
+        this.id = id;
+        seleniumBasedWebScraper = new SeleniumBasedWebScraper(new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
         this.url = url;
         this.query = query;
     }
 
     @Override
-    public final Set<HARDWARE> scrape(ScrapeListener<HARDWARE> onScrape) throws Throwable {
-        Document doc = seleniumBasedWebScraper.scrapeWithCache(url, Duration.ofDays(90));
+    public Set<Document> downloadWebsites() throws Throwable {
+        return Set.of(seleniumBasedWebScraper.fetch(ComponentWebScraper.topLevelHost(url), id, url, Duration.ofDays(90)));
+    }
 
-        Map<String, List<String>> specs = new HashMap<>();
+    @Override
+    public final Set<HARDWARE> scrape(Set<Document> doc, ScrapeListener<HARDWARE> onScrape) throws Throwable {
+        Set<HARDWARE> scraped = new HashSet<>();
+        for (Document document : doc) {
+            Map<String, List<String>> specs = new HashMap<>();
+            parsePageToSpecs(document, specs);
 
-        String[] numbers = new String[]{"", "", ""};
-        parsePageToSpecs(doc, specs);
-        extractNumbers(doc, numbers, specs);
+            if (!specs.containsKey("EAN") && !specs.containsKey("UPC") && !specs.containsKey("MPN")) {
+                ScrapingService.LOGGER.log(Level.WARNING, "No product numbers were found. [" + url + "]");
+                continue;
+            }
+            String EAN = specs.getOrDefault("EAN", List.of("---")).getFirst();
+            String UPC = specs.getOrDefault("UPC", List.of("---")).getFirst();
+            String MPN = specs.getOrDefault("MPN", List.of("---")).getFirst();
 
-        String EAN = numbers[0];
-        String UPC = numbers[1];
-        String MPN = numbers[2];
+            if (EAN.isBlank() && UPC.isBlank() && MPN.isBlank()) {
+                ScrapingService.LOGGER.log(Level.WARNING, "No product numbers were found. [" + url + "]");
+                continue;
+            }
 
-        if (EAN.isBlank() && UPC.isBlank() && MPN.isBlank()) {
-            ScrapingService.LOGGER.log(Level.WARNING, "No product numbers were found. [" + url + "]");
-            return Set.of();
+            HARDWARE hardware = query.findHardwareOrCreate(EAN, UPC, MPN);
+            hardware.setEAN(EAN);
+            hardware.setMPN(MPN);
+            hardware.setUPC(UPC);
+            translateSpecsToTarget(specs, hardware);
+
+            if (specs.containsKey("model") && !specs.get("model").isEmpty()) {
+                hardware.setModel(specs.get("model").getFirst());
+            }
+
+            scraped.add(hardware);
+            onScrape.onScrape(hardware);
         }
 
-        HARDWARE hardware = query.findHardwareOrCreate(EAN, UPC, MPN);
-        hardware.setEAN(EAN);
-        hardware.setMPN(MPN);
-        hardware.setUPC(UPC);
-        translateSpecsToTarget(specs, hardware);
-
-        if(specs.containsKey("model") && !specs.get("model").isEmpty()) {
-            hardware.setModel(specs.get("model").getFirst());
-        }
-
-        onScrape.onScrape(hardware);
-        return Set.of(hardware);
+        return scraped;
     }
 
     protected abstract void parsePageToSpecs(Document page, Map<String, List<String>> specs) throws Throwable;
-
-    protected abstract void extractNumbers(Document page, String[] numbers, Map<String, List<String>> specs);
 
     protected void translateSpecsToTarget(Map<String, List<String>> specs, HARDWARE target) {
 
     }
 
-    public interface HardwareQuery<HARDWARE extends HardwareSpec> {
+    public interface HardwareQuery<HARDWARE extends HardwareSpec<HARDWARE>> {
         HARDWARE findHardwareOrCreate(String EAN, String UPC, String MPN);
-    }
-
-    protected void setEAN(String EAN, String[] numbers) {
-        numbers[0] = EAN;
-    }
-
-    protected void setUPC(String UPC, String[] numbers) {
-        numbers[1] = UPC;
-    }
-
-    protected void setMPN(String MPN, String[] numbers) {
-        numbers[2] = MPN;
     }
 
     @Override

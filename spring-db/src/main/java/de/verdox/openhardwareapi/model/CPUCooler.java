@@ -17,7 +17,16 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class CPUCooler extends HardwareSpec {
+public class CPUCooler extends HardwareSpec<CPUCooler> {
+    @Override
+    public void merge(CPUCooler other) {
+        super.merge(other);
+        mergeEnum(other, CPUCooler::getType, CPUCooler::setType, HardwareTypes.CoolerType.UNKNOWN);
+        mergeEnumCollection(other, CPUCooler::getSupportedSockets);
+        mergeNumber(other, CPUCooler::getRadiatorLengthMm, CPUCooler::setRadiatorLengthMm);
+        mergeNumber(other, CPUCooler::getTdpWatts, CPUCooler::setTdpWatts);
+    }
+
     @Enumerated(EnumType.STRING)
     private HardwareTypes.CoolerType type; // Luft oder AIO
 
@@ -39,20 +48,22 @@ public class CPUCooler extends HardwareSpec {
     @Override
     public String toString() {
         return "CPUCooler{" +
-                "type=" + type +
+                "UPC='" + UPC + '\'' +
+                ", type=" + type +
                 ", supportedSockets=" + supportedSockets +
                 ", radiatorLengthMm=" + radiatorLengthMm +
+                ", tdpWatts=" + tdpWatts +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
-                ", tags=" + tags +
-                ", attributes=" + attributes +
                 '}';
     }
 
     @Override
     public void checkIfLegal() {
-        if(type == null) {
+        if (type == null) {
             throw new IllegalArgumentException("The cooler type cannot be null!");
         }
     }

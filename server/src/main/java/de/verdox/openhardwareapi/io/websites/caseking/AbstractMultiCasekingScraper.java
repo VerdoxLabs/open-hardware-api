@@ -9,38 +9,31 @@ import org.jsoup.nodes.Element;
 import java.util.*;
 import java.util.function.BiConsumer;
 
-public abstract class AbstractMultiCasekingScraper<HARDWARE extends HardwareSpec> extends MultiPageHardwareScraper<HARDWARE> {
-    public AbstractMultiCasekingScraper(String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
-        super(baseUrl, singlePageHardwareScraper);
+public abstract class AbstractMultiCasekingScraper<HARDWARE extends HardwareSpec<HARDWARE>> extends MultiPageHardwareScraper<HARDWARE> {
+    public AbstractMultiCasekingScraper(String id, String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
+        super(id, baseUrl, singlePageHardwareScraper);
     }
 
     @Override
-    protected void extractMultiPageURLs(Document page, Queue<String> multiPageURLs) {
-        for (Element element : page.select("li.page-item")) {
-            if (element.text().equals(">")) {
-                var a = element.selectFirst("a");
-                if(a != null) {
-                    multiPageURLs.offer(a.attr("href"));
-                    break;
-                }
-            }
-        }
+    protected void extractMultiPageURLs(String currentUrl, Document page, Queue<String> multiPageURLs) {
+
     }
 
     @Override
-    protected void extractSinglePagesURLs(Document page, Set<String> singlePageURLs) {
-        for (Element element : page.select("div.product-tiles")) {
-            var nextPage = element.selectFirst("a.badge-group-wrapper");
-            if(nextPage != null) {
-                singlePageURLs.add("https://www.caseking.de" + nextPage.attr("href"));
-            }
-        }
+    protected void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+
     }
 
-    public static class Builder<HARDWARE extends HardwareSpec> {
+    public static class Builder<HARDWARE extends HardwareSpec<HARDWARE>> {
         private String[] urls;
         private SinglePageHardwareScraper.HardwareQuery<HARDWARE> query;
         private BiConsumer<HARDWARE, Map<String, List<String>>> logic;
+        private String id;
+
+        public Builder<HARDWARE> withId(String id) {
+            this.id = id;
+            return this;
+        }
 
         public Builder<HARDWARE> withURLs(String... urls) {
             this.urls = urls;
@@ -71,7 +64,7 @@ public abstract class AbstractMultiCasekingScraper<HARDWARE extends HardwareSpec
                 throw new IllegalStateException("No spec translation logic defined");
             }
 
-            return new AbstractMultiCasekingScraper<>("", new AbstractSingleCasekingScraper<>("", query) {
+            return new AbstractMultiCasekingScraper<>(id, "", new AbstractSingleCasekingScraper<>(id, "", query) {
                 @Override
                 protected void translateSpecsToTarget(Map<String, List<String>> specs, HARDWARE target) {
                     super.translateSpecsToTarget(specs, target);

@@ -1,6 +1,6 @@
 package de.verdox.openhardwareapi.component;
 
-import de.verdox.openhardwareapi.io.api.SeleniumBasedWebScraper;
+import de.verdox.openhardwareapi.io.api.selenium.SeleniumBasedWebScraper;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 

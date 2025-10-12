@@ -25,7 +25,7 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec, Long
 
     Optional<HardwareSpec> findByEANIgnoreCase(String ean);
     Optional<HardwareSpec> findByMPNIgnoreCase(String mpn);
-    Optional<HardwareSpec> findByUPCIgnoreCase(String mpn);
+    Optional<HardwareSpec> findByUPCIgnoreCase(String upc);
 
     // Rohwerte (Groß-/Kleinschreibung wie gespeichert)
     @Query("""

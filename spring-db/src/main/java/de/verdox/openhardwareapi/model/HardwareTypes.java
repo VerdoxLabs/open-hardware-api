@@ -95,22 +95,19 @@ public class HardwareTypes {
     }
 
 
-    public enum RamType {UNKNOWN, DDR, DDR2, DDR3, DDR4, DDR5}
+    public enum RamType {UNKNOWN, DDR5, DDR4, DDR3, DDR2, DDR}
 
 
-    public enum RamFormFactor {UDIMM, SO_DIMM}
+    public enum StorageType {UNKNOWN, HDD, SSD}
 
 
-    public enum StorageType {HDD, SSD}
-
-
-    public enum StorageInterface {SATA, NVME}
+    public enum StorageInterface {UNKNOWN, SATA, NVME}
 
 
     public enum PcieVersion {UNKNOWN, GEN1, GEN2, GEN3, GEN4, GEN5, GEN6}
 
 
-    public enum CoolerType {AIR, AIO_LIQUID}
+    public enum CoolerType {UNKNOWN, AIR, AIO_LIQUID}
 
 
     @Getter
@@ -126,10 +123,10 @@ public class HardwareTypes {
     public enum PSU_MODULARITY {UNKNOWN, NON_MODULAR, SEMI_MODULAR, FULL_MODULAR}
 
 
-    public enum PsuEfficiencyRating {NONE, BRONZE, SILVER, GOLD, PLATINUM, TITANIUM}
+    public enum PsuEfficiencyRating {UNKNOWN, NONE, BRONZE, SILVER, GOLD, PLATINUM, TITANIUM}
 
 
-    public enum CaseSizeClass {MINI_ITX, MICRO_ATX, MID_TOWER, FULL_TOWER}
+    public enum CaseSizeClass {UNKNOWN, MINI_ITX, MICRO_ATX, MID_TOWER, FULL_TOWER}
 
     public enum VRAM_TYPE {UNKNOWN, GDDR, GDDR2, GDDR3, GDDR4, GDDR5, GDDR5X, GDDR6, GDDR6X, HBM1, HBM2, HBM3, HBM2E, LPDDR5, DDR5, DDR4}
 

@@ -2,6 +2,7 @@ package de.verdox.openhardwareapi.io.pc_combo_scraper;
 
 import de.verdox.openhardwareapi.component.service.HardwareSpecService;
 import de.verdox.openhardwareapi.component.service.ScrapingService;
+import de.verdox.openhardwareapi.configuration.DataStorage;
 import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
 import de.verdox.openhardwareapi.io.pc_combo_scraper.cache.SpecStore;
 import de.verdox.openhardwareapi.model.HardwareSpec;
@@ -42,14 +43,14 @@ import static de.verdox.openhardwareapi.io.api.ComponentWebScraper.*;
  * - Struktur klar getrennt: Download/Caching vs. Parsing/Mapping.
  * - Wir speichern weiterhin AUSSCHLIESSLICH Spec-/Detailseiten (Map/List + optional HTML) im SpecStore.
  */
-public abstract class AbstractPCKomboScraper<HARDWARE extends HardwareSpec> implements ComponentWebScraper<HARDWARE> {
+public abstract class AbstractPCKomboScraper<HARDWARE extends HardwareSpec<HARDWARE>> implements ComponentWebScraper<HARDWARE> {
 
     private final String prefix;
     protected final HardwareSpecService hardwareSpecService;
     private final String baseUrl;
     private final Supplier<HARDWARE> constructor;
 
-    private final SpecStore specStore = new SpecStore(java.nio.file.Path.of("data"), "pc-kombo-parser-v1");
+    private final SpecStore specStore = new SpecStore(DataStorage.resolve("scraping"), "pc-kombo-parser-v1");
     private final Duration specTtl = Duration.ofDays(60);
     private static final String PARSER_VERSION = "pc-kombo-parser-v1";
 
@@ -124,7 +125,12 @@ public abstract class AbstractPCKomboScraper<HARDWARE extends HardwareSpec> impl
     }
 
     @Override
-    public Set<HARDWARE> scrape(ScrapeListener<HARDWARE> onScrape) throws Throwable {
+    public Set<Document> downloadWebsites() throws Throwable {
+        return Set.of();
+    }
+
+    @Override
+    public Set<HARDWARE> scrape(Set<Document> pages, ScrapeListener<HARDWARE> onScrape) throws Throwable {
         List<PcKomboListItem> items;
         boolean listFromCache = false;
 
@@ -233,7 +239,7 @@ public abstract class AbstractPCKomboScraper<HARDWARE extends HardwareSpec> impl
                     hw.setUPC(UPC);
 
                     Example<HARDWARE> example = Example.of(hw, matcher);
-                    hw = hardwareSpecService.findByExample((Class<HARDWARE>) hw.getClass(), example);
+                    hw = (HARDWARE) hardwareSpecService.findByExample((Class<HARDWARE>) hw.getClass(), example);
                     fillBasicsFromSpecs(base, hw, specs);
                 } else if (!knowsHardware) {
                     hw = constructor.get();

@@ -19,7 +19,24 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class Motherboard extends HardwareSpec {
+public class Motherboard extends HardwareSpec<Motherboard> {
+
+    @Override
+    public void merge(Motherboard other) {
+        super.merge(other);
+        mergeEnum(other, Motherboard::getSocket, Motherboard::setSocket, HardwareTypes.CpuSocket.UNKNOWN);
+        mergeEnum(other, Motherboard::getChipset, Motherboard::setChipset, HardwareTypes.Chipset.UNKNOWN);
+        mergeEnum(other, Motherboard::getFormFactor, Motherboard::setFormFactor, HardwareTypes.MotherboardFormFactor.UNKNOWN);
+        mergeEnum(other, Motherboard::getRamType, Motherboard::setRamType, HardwareTypes.RamType.UNKNOWN);
+        mergeNumber(other, Motherboard::getRamSlots, Motherboard::setRamSlots);
+        mergeNumber(other, Motherboard::getRamCapacity, Motherboard::setRamCapacity);
+        mergeNumber(other, Motherboard::getSataSlots, Motherboard::setSataSlots);
+        mergeSet(other, Motherboard::getM2Slots);
+        mergeSet(other, Motherboard::getPcieSlots);
+        mergeSet(other, Motherboard::getUsbPort);
+        mergeNumber(other, Motherboard::getUsb3Headers, Motherboard::setUsb3Headers);
+    }
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private HardwareTypes.CpuSocket socket = HardwareTypes.CpuSocket.UNKNOWN;
@@ -63,25 +80,31 @@ public class Motherboard extends HardwareSpec {
     @PositiveOrZero
     private int usb3Headers = 0;
 
+    @Override
+    public void checkIfLegal() {
+
+    }
 
     @Override
     public String toString() {
         return "Motherboard{" +
-                "socket=" + socket +
+                "usbPort=" + usbPort +
+                ", socket=" + socket +
                 ", chipset=" + chipset +
                 ", formFactor=" + formFactor +
                 ", ramType=" + ramType +
                 ", ramSlots=" + ramSlots +
+                ", ramCapacity=" + ramCapacity +
+                ", sataSlots=" + sataSlots +
+                ", m2Slots=" + m2Slots +
+                ", pcieSlots=" + pcieSlots +
+                ", usb3Headers=" + usb3Headers +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
-                ", tags=" + tags +
-                ", attributes=" + attributes +
                 '}';
-    }
-
-    @Override
-    public void checkIfLegal() {
-
     }
 }

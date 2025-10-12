@@ -9,13 +9,17 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
-public interface HardwareSpecificRepo<HARDWARE extends HardwareSpec> extends JpaRepository<HARDWARE, Long>, JpaSpecificationExecutor<HARDWARE> {
+public interface HardwareSpecificRepo<HARDWARE extends HardwareSpec<HARDWARE>> extends JpaRepository<HARDWARE, Long>, JpaSpecificationExecutor<HARDWARE> {
+    static String normalizeEANMPNUPC(String s) {
+        if (s == null) return null;
+        return s.trim().replaceAll("[\\s\\-_.]", "").toUpperCase();
+    }
+
     Page<HARDWARE> findByModelContainingIgnoreCase(String model, Pageable pageable);
 
     @Query("select h from HardwareSpec h where type(h) = :clazz")
@@ -64,5 +68,35 @@ public interface HardwareSpecificRepo<HARDWARE extends HardwareSpec> extends Jpa
 
     Optional<HARDWARE> findByUPCIgnoreCase(String mpn);
 
-    Optional<HardwareSpec> findByEANIgnoreCaseOrMPNIgnoreCaseOrUPCIgnoreCase(String ean, String mpn, String upc);
+    List<HARDWARE> findByEAN(String ean);
+
+    Optional<HARDWARE> findByEANIgnoreCaseOrMPNIgnoreCaseOrUPCIgnoreCase(String ean, String mpn, String upc);
+
+    @Query("select h from HardwareSpec h where h.EAN in :eans")
+    List<HARDWARE> findAllByEANNormIn(@Param("eans") Set<String> eans);
+
+    @Query("select h from HardwareSpec h where h.MPN in :mpns")
+    List<HARDWARE> findAllByMPNNormIn(@Param("mpns") Set<String> mpns);
+
+    @Query("select h from HardwareSpec h where h.UPC in :upcs")
+    List<HARDWARE> findAllByUPCNormIn(@Param("upcs") Set<String> upcs);
+
+    // Helper zum Map-Bau:
+    default Map<String, HARDWARE> findAllByEANInNormalized(Set<String> eans) {
+        if (eans.isEmpty()) return Map.of();
+        return findAllByEANNormIn(eans).stream()
+                .collect(Collectors.toMap(HARDWARE::getEAN, h -> h));
+    }
+
+    default Map<String, HARDWARE> findAllByMPNInNormalized(Set<String> mpns) {
+        if (mpns.isEmpty()) return Map.of();
+        return findAllByMPNNormIn(mpns).stream()
+                .collect(Collectors.toMap(HARDWARE::getMPN, h -> h));
+    }
+
+    default Map<String, HARDWARE> findAllByUPCInNormalized(Set<String> upcs) {
+        if (upcs.isEmpty()) return Map.of();
+        return findAllByUPCNormIn(upcs).stream()
+                .collect(Collectors.toMap(HARDWARE::getUPC, h -> h));
+    }
 }

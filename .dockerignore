@@ -6,5 +6,5 @@ frontend/generated
 .git
 .gitignore
 .DS_Store
-/data
+/open-hardware-api
 /open-hardware-api

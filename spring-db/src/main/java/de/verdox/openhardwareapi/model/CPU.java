@@ -13,7 +13,25 @@ import lombok.Setter;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class CPU extends HardwareSpec {
+public class CPU extends HardwareSpec<CPU> {
+
+    @Override
+    public void merge(CPU other) {
+        super.merge(other);
+        mergeEnum(other, CPU::getSocket, CPU::setSocket, HardwareTypes.CpuSocket.UNKNOWN);
+        mergeString(other, CPU::getIntegratedGraphics, CPU::setIntegratedGraphics);
+        mergeNumber(other, CPU::getCores, CPU::setCores);
+        mergeNumber(other, CPU::getEfficiencyCores, CPU::setEfficiencyCores);
+        mergeNumber(other, CPU::getPerformanceCores, CPU::setPerformanceCores);
+        mergeNumber(other, CPU::getThreads, CPU::setThreads);
+        mergeNumber(other, CPU::getBaseClockMhz, CPU::setBaseClockMhz);
+        mergeNumber(other, CPU::getBaseClockMhzEfficiency, CPU::setBaseClockMhzEfficiency);
+        mergeNumber(other, CPU::getBaseClockMhzPerformance, CPU::setBaseClockMhzPerformance);
+        mergeNumber(other, CPU::getBoostClockMhz, CPU::setBoostClockMhz);
+        mergeNumber(other, CPU::getL3CacheMb, CPU::setL3CacheMb);
+        mergeNumber(other, CPU::getTdpWatts, CPU::setTdpWatts);
+    }
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private HardwareTypes.CpuSocket socket = HardwareTypes.CpuSocket.UNKNOWN;
@@ -33,17 +51,21 @@ public class CPU extends HardwareSpec {
     private int performanceCores = 0;
 
 
-    @PositiveOrZero @Column(nullable = false)
+    @PositiveOrZero
+    @Column(nullable = false)
     private int threads = 0;
 
 
-    @PositiveOrZero @Column(nullable = false)
+    @PositiveOrZero
+    @Column(nullable = false)
     private double baseClockMhz = 0;
 
-    @PositiveOrZero @Column(nullable = false)
+    @PositiveOrZero
+    @Column(nullable = false)
     private double baseClockMhzEfficiency = 0;
 
-    @PositiveOrZero @Column(nullable = false)
+    @PositiveOrZero
+    @Column(nullable = false)
     private double baseClockMhzPerformance = 0;
 
     @PositiveOrZero
@@ -60,18 +82,24 @@ public class CPU extends HardwareSpec {
     @Override
     public String toString() {
         return "CPU{" +
-                "socket=" + socket +
-                ", cores=" + cores +
-                ", threads=" + threads +
-                ", baseClockMhz=" + baseClockMhz +
-                ", boostClockMhz=" + boostClockMhz +
+                "boostClockMhz=" + boostClockMhz +
                 ", l3CacheMb=" + l3CacheMb +
                 ", tdpWatts=" + tdpWatts +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", socket=" + socket +
+                ", integratedGraphics='" + integratedGraphics + '\'' +
+                ", cores=" + cores +
+                ", efficiencyCores=" + efficiencyCores +
+                ", performanceCores=" + performanceCores +
+                ", threads=" + threads +
+                ", baseClockMhz=" + baseClockMhz +
+                ", baseClockMhzEfficiency=" + baseClockMhzEfficiency +
+                ", baseClockMhzPerformance=" + baseClockMhzPerformance +
                 ", launchDate=" + launchDate +
-                ", tags=" + tags +
-                ", attributes=" + attributes +
                 '}';
     }
 

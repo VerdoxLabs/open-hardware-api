@@ -8,54 +8,43 @@ import org.jsoup.nodes.Element;
 
 import java.util.*;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 
-public abstract class AbstractMultiAlternateScraper<HARDWARE extends HardwareSpec> extends MultiPageHardwareScraper<HARDWARE> {
-    public AbstractMultiAlternateScraper(String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
-        super(baseUrl, singlePageHardwareScraper);
-        seleniumBasedWebScraper.setIsChallengePage(document -> {
+public abstract class AbstractMultiAlternateScraper<HARDWARE extends HardwareSpec<HARDWARE>> extends MultiPageHardwareScraper<HARDWARE> {
+    public AbstractMultiAlternateScraper(String id, String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
+        super(id, baseUrl, singlePageHardwareScraper);
+        seleniumBasedWebScraper.setIsChallengePage(CHALLENGE_DETECTOR());
+        singlePageHardwareScraper.getSeleniumBasedWebScraper().setIsChallengePage(CHALLENGE_DETECTOR());
+    }
+
+    private static BiPredicate<String, Document> CHALLENGE_DETECTOR() {
+        return (url, document) -> {
             if (document == null) return true;
             document.body();
             return document.body().childrenSize() == 0 && document.body().text().trim().isEmpty();
-        });
-        singlePageHardwareScraper.getSeleniumBasedWebScraper().setIsChallengePage(document -> {
-            if (document == null) return true;
-            document.body();
-            return document.body().childrenSize() == 0 && document.body().text().trim().isEmpty();
-        });
+        };
     }
 
     @Override
-    protected void extractMultiPageURLs(Document page, Queue<String> multiPageURLs) {
-        for (Element mt2 : page.select("div.mt-2")) {
-            for (Element a : mt2.select("a")) {
-                if (a.attr("aria-label").equals("Nächste Seite")) {
-                    String linkToNextPage = a.attr("href");
-                    multiPageURLs.add("https://www.alternate.at" + linkToNextPage);
-                    break;
-                }
-            }
-        }
+    protected void extractMultiPageURLs(String currentUrl, Document page, Queue<String> multiPageURLs) {
+
     }
 
     @Override
-    protected void extractSinglePagesURLs(Document page, Set<String> singlePageURLs) {
-        for (Element containerListing : page.select("div.grid-container listing")) {
-            var a = containerListing.selectFirst("a");
-            if (a == null) {
-                continue;
-            }
-            String url = a.attr("href");
-            if (url.isBlank()) {
-                continue;
-            }
-            singlePageURLs.add(url);
-        }
+    protected void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+
     }
 
-    public static class Builder<HARDWARE extends HardwareSpec> {
+    public static class Builder<HARDWARE extends HardwareSpec<HARDWARE>> {
         private String[] urls;
         private SinglePageHardwareScraper.HardwareQuery<HARDWARE> query;
         private BiConsumer<HARDWARE, Map<String, List<String>>> logic;
+        private String id;
+
+        public Builder<HARDWARE> withId(String id) {
+            this.id = id;
+            return this;
+        }
 
         public Builder<HARDWARE> withURLs(String... urls) {
             this.urls = urls;
@@ -86,7 +75,7 @@ public abstract class AbstractMultiAlternateScraper<HARDWARE extends HardwareSpe
                 throw new IllegalStateException("No spec translation logic defined");
             }
 
-            return new AbstractMultiAlternateScraper<>("", new AbstractSingleAlternateScraper<>("", query) {
+            return new AbstractMultiAlternateScraper<>(id, "", new AbstractSingleAlternateScraper<>(id, "", query) {
                 @Override
                 protected void translateSpecsToTarget(Map<String, List<String>> specs, HARDWARE target) {
                     super.translateSpecsToTarget(specs, target);

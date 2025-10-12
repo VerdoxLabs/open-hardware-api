@@ -1,4 +1,4 @@
-package de.verdox.openhardwareapi.io.api;
+package de.verdox.openhardwareapi.io.api.selenium;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -13,7 +13,21 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class RAM extends HardwareSpec {
+public class RAM extends HardwareSpec<RAM> {
+
+    @Override
+    public void merge(RAM other) {
+        super.merge(other);
+        mergeEnum(other, RAM::getType, RAM::setType, HardwareTypes.RamType.UNKNOWN);
+        mergeNumber(other, RAM::getSticks, RAM::setSticks);
+        mergeNumber(other, RAM::getSizeGb, RAM::setSizeGb);
+        mergeNumber(other, RAM::getSpeedMtps, RAM::setSpeedMtps);
+        mergeNumber(other, RAM::getCasLatency, RAM::setCasLatency);
+        mergeNumber(other, RAM::getRowAddressToColumnAddressDelay, RAM::setRowAddressToColumnAddressDelay);
+        mergeNumber(other, RAM::getRowPrechargeTime, RAM::setRowPrechargeTime);
+        mergeNumber(other, RAM::getRowActiveTime, RAM::setRowActiveTime);
+    }
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private HardwareTypes.RamType type = HardwareTypes.RamType.UNKNOWN;
@@ -41,12 +55,27 @@ public class RAM extends HardwareSpec {
     private Integer rowActiveTime = 0; // TRAS
 
     @Override
-    public String toString() {
-        return "RAM{" + "type=" + type + ", sizeGb=" + sizeGb + ", speedMtps=" + speedMtps + ", casLatency=" + casLatency + "-" + rowAddressToColumnAddressDelay + "-" + rowPrechargeTime + "-" + rowActiveTime + ", manufacturer='" + manufacturer + '\'' + ", model='" + model + '\'' + ", launchDate=" + launchDate + ", tags=" + tags + ", attributes=" + attributes + '}';
+    public void checkIfLegal() {
+
     }
 
     @Override
-    public void checkIfLegal() {
-
+    public String toString() {
+        return "RAM{" +
+                "manufacturer='" + manufacturer + '\'' +
+                ", type=" + type +
+                ", sticks=" + sticks +
+                ", sizeGb=" + sizeGb +
+                ", speedMtps=" + speedMtps +
+                ", casLatency=" + casLatency +
+                ", rowAddressToColumnAddressDelay=" + rowAddressToColumnAddressDelay +
+                ", rowPrechargeTime=" + rowPrechargeTime +
+                ", rowActiveTime=" + rowActiveTime +
+                ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", launchDate=" + launchDate +
+                '}';
     }
 }

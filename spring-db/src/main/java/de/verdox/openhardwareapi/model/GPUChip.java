@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import de.verdox.openhardwareapi.model.values.PowerConnector;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -20,7 +21,19 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class GPUChip extends HardwareSpec {
+public class GPUChip extends HardwareSpec<GPUChip> {
+
+    @Override
+    public void merge(GPUChip other) {
+        super.merge(other);
+        mergeString(other, GPUChip::getCanonicalModel, GPUChip::setCanonicalModel);
+        mergeEnum(other, GPUChip::getPcieVersion, GPUChip::setPcieVersion, HardwareTypes.PcieVersion.UNKNOWN);
+        mergeEnum(other, GPUChip::getVramType, GPUChip::setVramType, HardwareTypes.VRAM_TYPE.UNKNOWN);
+        mergeNumber(other, GPUChip::getVramGb, GPUChip::setVramGb);
+        mergeNumber(other, GPUChip::getLengthMm, GPUChip::setLengthMm);
+        mergeNumber(other, GPUChip::getTdp, GPUChip::setTdp);
+        mergeSet(other, GPUChip::getPowerConnectors);
+    }
 
     private String canonicalModel;
 
@@ -39,6 +52,7 @@ public class GPUChip extends HardwareSpec {
 
     private double tdp = 0;
 
+    @JsonIgnore
     @OneToMany(mappedBy = "chip", fetch = FetchType.EAGER) // optionaler Rückverweis
     private Set<GPU> gpus = new HashSet<>();
 
@@ -48,25 +62,29 @@ public class GPUChip extends HardwareSpec {
     private Set<PowerConnector> powerConnectors = new LinkedHashSet<>();
 
     @Override
-    public String toString() {
-        return "GPU{" +
-                "pcieVersion=" + pcieVersion +
-                ", vramType=" + vramType +
-                ", vramGb=" + vramGb +
-                ", lengthMm=" + lengthMm +
-                ", powerConnectors=" + powerConnectors +
-                ", manufacturer='" + manufacturer + '\'' +
-                ", model='" + model + '\'' +
-                ", launchDate=" + launchDate +
-                ", tags=" + tags +
-                ", attributes=" + attributes +
-                '}';
+    public void checkIfLegal() {
+        if (canonicalModel == null || canonicalModel.isBlank()) {
+            throw new IllegalArgumentException("canonical model cannot be null or blank for gpu chip " + getModel());
+        }
     }
 
     @Override
-    public void checkIfLegal() {
-        if (canonicalModel == null || canonicalModel.isBlank()) {
-            throw new IllegalArgumentException("canonical model cannot be null or blank for gpu chip "+getModel());
-        }
+    public String toString() {
+        return "GPUChip{" +
+                "model='" + model + '\'' +
+                ", canonicalModel='" + canonicalModel + '\'' +
+                ", pcieVersion=" + pcieVersion +
+                ", vramType=" + vramType +
+                ", vramGb=" + vramGb +
+                ", lengthMm=" + lengthMm +
+                ", tdp=" + tdp +
+                ", gpus=" + gpus +
+                ", powerConnectors=" + powerConnectors +
+                ", manufacturer='" + manufacturer + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", launchDate=" + launchDate +
+                '}';
     }
 }

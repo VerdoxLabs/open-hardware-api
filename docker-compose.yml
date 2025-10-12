@@ -34,7 +34,7 @@ services:
     ports:
       - "5050:8080"
     volumes:
-      - ./open-hardware-api:/data
+      - "./open-hardware-api:/var/lib/open-hardware-api"
 
 volumes:
   db-data:

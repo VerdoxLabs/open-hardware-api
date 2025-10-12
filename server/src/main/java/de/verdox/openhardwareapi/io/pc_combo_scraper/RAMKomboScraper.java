@@ -29,6 +29,8 @@ public class RAMKomboScraper extends AbstractPCKomboScraper<RAM> {
         target.setSizeGb(Math.toIntExact(parseFirstInt("Size", specs)));
         target.setSpeedMtps(Math.toIntExact(parseFirstInt("Clock", specs)));
 
+
+
         int[] timings = parseTimings(extractFirstString("Timings", specs));
         target.setCasLatency(timings[0]);
         target.setRowAddressToColumnAddressDelay(timings[1]);
@@ -63,7 +65,7 @@ public class RAMKomboScraper extends AbstractPCKomboScraper<RAM> {
             }
             return result;
         } catch (Exception e) {
-            ScrapingService.LOGGER.log(Level.SEVERE, "Failed to parse timings " + timings, e);
+            ScrapingService.LOGGER.log(Level.SEVERE, "Failed to parse timings " + timings, e.getMessage());
             return new int[4];
         }
     }

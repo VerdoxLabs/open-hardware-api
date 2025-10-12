@@ -1,36 +1,41 @@
 package de.verdox.openhardwareapi.io.api;
 
 import de.verdox.openhardwareapi.component.service.ScrapingService;
+import de.verdox.openhardwareapi.configuration.DataStorage;
+import de.verdox.openhardwareapi.io.api.selenium.CookieJar;
+import de.verdox.openhardwareapi.io.api.selenium.FScrapingCache;
+import de.verdox.openhardwareapi.io.api.selenium.SeleniumBasedWebScraper;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import org.jsoup.nodes.Document;
 
-import java.nio.file.Path;
+import java.net.MalformedURLException;
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.HashSet;
-import java.util.Queue;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Level;
 
-public abstract class MultiPageHardwareScraper<HARDWARE extends HardwareSpec> implements ComponentWebScraper<HARDWARE> {
+public abstract class MultiPageHardwareScraper<HARDWARE extends HardwareSpec<HARDWARE>> implements ComponentWebScraper<HARDWARE> {
+    protected final String id;
     protected final String baseUrl;
     protected final SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper;
-    protected final SeleniumBasedWebScraper seleniumBasedWebScraper = new SeleniumBasedWebScraper(new ScrapingCache(Path.of("./data/scraping")), new CookieJar(Path.of("./data/scraping")));
+    protected final SeleniumBasedWebScraper seleniumBasedWebScraper;
 
-    public MultiPageHardwareScraper(String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
+    public MultiPageHardwareScraper(String id, String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
+        this.id = id;
+        this.seleniumBasedWebScraper = new SeleniumBasedWebScraper(new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
         this.baseUrl = baseUrl;
         this.singlePageHardwareScraper = singlePageHardwareScraper;
     }
 
     protected abstract void setup(Queue<String> multiPageURLs);
 
-    protected abstract void extractMultiPageURLs(Document page, Queue<String> multiPageURLs);
+    protected abstract void extractMultiPageURLs(String currentUrl, Document page, Queue<String> multiPageURLs);
 
-    protected abstract void extractSinglePagesURLs(Document page, Set<String> singlePageURLs);
+    protected abstract void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) throws MalformedURLException, InterruptedException;
 
     @Override
-    public final Set<HARDWARE> scrape(ScrapeListener<HARDWARE> onScrape) throws Throwable {
-        Set<HARDWARE> scraped = new HashSet<>();
+    public Set<Document> downloadWebsites() throws Throwable {
+
+        Set<Document> singlePagesScraped = new HashSet<>();
         Set<String> singlePages = new HashSet<>();
         Queue<String> multiPages = new ArrayDeque<>();
         if (!baseUrl.isBlank()) multiPages.add(baseUrl);
@@ -41,7 +46,6 @@ public abstract class MultiPageHardwareScraper<HARDWARE extends HardwareSpec> im
             return Set.of();
         }
 
-        // Phase 1: Auflisten (0.1 -> 0.5)
         float p = 0.1f;
 
         Set<String> alreadyCollected = new HashSet<>();
@@ -50,50 +54,51 @@ public abstract class MultiPageHardwareScraper<HARDWARE extends HardwareSpec> im
         while (!multiPages.isEmpty()) {
             String nextUrl = multiPages.poll();
             if (alreadyCollected.contains(nextUrl)) {
-                ScrapingService.LOGGER.log(Level.INFO, "Skipping double entry: " + nextUrl);
                 continue;
             }
             alreadyCollected.add(nextUrl);
 
-            Document doc = seleniumBasedWebScraper.scrapeWithCache(nextUrl, Duration.ofDays(30));
 
-            extractMultiPageURLs(doc, multiPages);
+            try {
+                Document doc = seleniumBasedWebScraper.fetch(ComponentWebScraper.topLevelHost(nextUrl), id, nextUrl, Duration.ofDays(30));
+                extractMultiPageURLs(nextUrl, doc, multiPages);
+                extractSinglePagesURLs(nextUrl, doc, singlePages);
+                p += (0.5f - p) * 0.5f;
+            } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
 
-            int before = singlePages.size();
-            extractSinglePagesURLs(doc, singlePages);
-            // Annäherung an 0.5 ohne Überschwingen
-            p += (0.5f - p) * 0.5f;
+            }
+
         }
 
         ScrapingService.LOGGER.log(Level.INFO, "Scraping " + singlePages.size() + " found products...");
 
-        // Phase 2: Einzel-Seiten (0.5 -> 1.0)
         if (this.singlePageHardwareScraper != null && !singlePages.isEmpty()) {
-            final int total = singlePages.size();
             int i = 0;
             for (String url : singlePages) {
                 if (alreadyCollected.contains(url)) continue;
-                int displayIndex = i + 1;
                 singlePageHardwareScraper.setUrl(url);
                 try {
-                    scraped.addAll(singlePageHardwareScraper.scrape(onScrape));
+                    singlePagesScraped.addAll(singlePageHardwareScraper.downloadWebsites());
                 } catch (Throwable ex) {
                     ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape single page " + url, ex);
                 } finally {
                     i++;
-                    float phaseProgress = (i / (float) total);           // 0..1
-                    float overall = 0.5f + 0.5f * phaseProgress;         // 0.5..1
                     alreadyCollected.add(url);
                 }
             }
-        } else {
-            // Keine Single-Seiten: direkt fertig
         }
-        ScrapingService.LOGGER.log(Level.INFO, "Done...");
-
-        return scraped;
+        return singlePagesScraped;
     }
 
+    @Override
+    public Map<String, List<String>> extract(Document document) {
+        return singlePageHardwareScraper.extract(document);
+    }
+
+    @Override
+    public Optional<HARDWARE> parse(Map<String, List<String>> specs, ScrapeListener<HARDWARE> onScrape) {
+        return singlePageHardwareScraper.parse(specs, onScrape);
+    }
 
     @Override
     public int getAmountTasks() {

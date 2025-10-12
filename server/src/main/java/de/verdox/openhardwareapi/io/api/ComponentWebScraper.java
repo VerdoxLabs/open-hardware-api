@@ -1,18 +1,37 @@
 package de.verdox.openhardwareapi.io.api;
 
+import com.google.common.net.InternetDomainName;
 import de.verdox.openhardwareapi.component.service.HardwareSpecService;
 import de.verdox.openhardwareapi.component.service.ScrapingService;
 import de.verdox.openhardwareapi.model.GPU;
 import de.verdox.openhardwareapi.model.GPUChip;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import de.verdox.openhardwareapi.util.GpuRegexParser;
+import org.jsoup.nodes.Document;
 
+import java.net.URI;
 import java.util.*;
 import java.util.function.BiPredicate;
 import java.util.logging.Level;
+import java.util.stream.Stream;
 
 public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
-    Set<HARDWARE> scrape(ScrapeListener<HARDWARE> onScrape) throws Throwable;
+
+    record ScrapedSpecPage(String url, Document page){}
+    record ScrapedSpecs(String url, Map<String, List<String>> specs){}
+
+    WebsiteScrapingStrategy getWebsiteScrapingStrategy();
+
+    void setWebsiteScrapingStrategy(WebsiteScrapingStrategy strategy);
+
+    //TODO: Step 1
+    Stream<ScrapedSpecPage> downloadWebsites() throws Throwable;
+
+    //TODO: Step 2
+    ScrapedSpecs extract(ScrapedSpecPage scrapedPage) throws Throwable;
+
+    //TODO: Step 3
+    Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable;
 
     int getAmountTasks();
 
@@ -59,7 +78,7 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
     static String extractFirstString(String key, Map<String, List<String>> map) {
         List<String> values = map.getOrDefault(key, new ArrayList<>());
-        if (values.isEmpty()) return "";
+        if (values == null || values.isEmpty()) return "";
         return values.getFirst();
     }
 
@@ -119,5 +138,25 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
             ScrapingService.LOGGER.log(Level.FINER, "No canonical name found: " + gpuName);
         }
         return null;
+    }
+
+    static String topLevelHost(String url) {
+        try {
+            return toTopLevel(URI.create(url).getHost());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String toTopLevel(String host) {
+        if (host == null) return null;
+        try {
+            var idn = InternetDomainName.from(host);
+            if (idn.isUnderPublicSuffix() || idn.hasPublicSuffix()) return idn.topPrivateDomain().toString();
+        } catch (Exception ignored) {
+        }
+        String[] parts = host.split("\\.");
+        if (parts.length >= 2) return parts[parts.length - 2] + "." + parts[parts.length - 1];
+        return host;
     }
 }

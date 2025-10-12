@@ -10,7 +10,7 @@ LABEL org.opencontainers.image.version=$VERSION \
 
 ENV HOME=/app
 WORKDIR $HOME
-COPY . .
+COPY .. .
 
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw clean package -DskipTests
@@ -31,18 +31,18 @@ LABEL org.opencontainers.image.version=$VERSION \
 
 RUN adduser -D -u 1000 appuser
 
-WORKDIR /data
+WORKDIR /var/lib/open-hardware-api
 
-RUN mkdir -p /data \
-  && chown -R appuser:appuser /data
+RUN mkdir -p /var/lib/open-hardware-api \
+  && chown -R appuser:appuser /var/lib/open-hardware-api
 
-COPY --chown=appuser:appuser --from=build /app/target/*.jar /app/app.jar
+COPY --chown=appuser:appuser --from=build /app/server/target/*.jar /app/app.jar
 
 USER appuser
 
 EXPOSE 8080
 ENV SPRING_PROFILES_ACTIVE=prod
 
-VOLUME ["/data"]
+VOLUME ["/var/lib/open-hardware-api"]
 
 ENTRYPOINT ["java","-XX:+UseContainerSupport","-XX:MaxRAMPercentage=75.0","-jar","/app/app.jar"]

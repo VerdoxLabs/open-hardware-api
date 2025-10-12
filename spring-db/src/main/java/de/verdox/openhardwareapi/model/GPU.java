@@ -8,13 +8,27 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.Objects;
+
 @Entity
 @DiscriminatorValue("GPU")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class GPU extends HardwareSpec {
+public class GPU extends HardwareSpec<GPU> {
+
+    @Override
+    public void merge(GPU other) {
+        super.merge(other);
+        mergeNumber(other, GPU::getLengthMm, GPU::setLengthMm);
+        merge(other, GPU::getChip, GPU::setChip, Objects::isNull);
+        mergeEnum(other, GPU::getPcieVersion, GPU::setPcieVersion, HardwareTypes.PcieVersion.UNKNOWN);
+        mergeEnum(other, GPU::getVramType, GPU::setVramType, HardwareTypes.VRAM_TYPE.UNKNOWN);
+        mergeNumber(other, GPU::getVramGb, GPU::setVramGb);
+        mergeNumber(other, GPU::getTdp, GPU::setTdp);
+    }
+
     @PositiveOrZero
     private double lengthMm = 0;
 
@@ -38,5 +52,23 @@ public class GPU extends HardwareSpec {
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Override
+    public String toString() {
+        return "GPU{" +
+                "MPN='" + MPN + '\'' +
+                ", lengthMm=" + lengthMm +
+                ", chip=" + chip +
+                ", pcieVersion=" + pcieVersion +
+                ", vramType=" + vramType +
+                ", vramGb=" + vramGb +
+                ", tdp=" + tdp +
+                ", manufacturer='" + manufacturer + '\'' +
+                ", model='" + model + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", launchDate=" + launchDate +
+                '}';
     }
 }

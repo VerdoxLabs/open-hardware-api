@@ -17,7 +17,18 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PSU extends HardwareSpec {
+public class PSU extends HardwareSpec<PSU> {
+
+    @Override
+    public void merge(PSU other) {
+        super.merge(other);
+        mergeNumber(other, PSU::getWattage, PSU::setWattage);
+        mergeEnum(other, PSU::getEfficiencyRating, PSU::setEfficiencyRating, HardwareTypes.PsuEfficiencyRating.UNKNOWN);
+        mergeEnum(other, PSU::getModularity, PSU::setModularity, HardwareTypes.PSU_MODULARITY.UNKNOWN);
+        mergeEnum(other, PSU::getSize, PSU::setSize, HardwareTypes.MotherboardFormFactor.UNKNOWN);
+        mergeSet(other, PSU::getConnectors);
+    }
+
     @PositiveOrZero
     @Column(nullable = false)
     private Integer wattage = 0;
@@ -38,22 +49,24 @@ public class PSU extends HardwareSpec {
     private Set<PowerConnector> connectors = new LinkedHashSet<>();
 
     @Override
-    public String toString() {
-        return "PSU{" +
-                "wattage=" + wattage +
-                ", efficiencyRating=" + efficiencyRating +
-                ", modularity=" + modularity +
-                ", connectors=" + connectors +
-                ", manufacturer='" + manufacturer + '\'' +
-                ", model='" + model + '\'' +
-                ", launchDate=" + launchDate +
-                ", tags=" + tags +
-                ", attributes=" + attributes +
-                '}';
+    public void checkIfLegal() {
+
     }
 
     @Override
-    public void checkIfLegal() {
-
+    public String toString() {
+        return "PSU{" +
+                "model='" + model + '\'' +
+                ", wattage=" + wattage +
+                ", efficiencyRating=" + efficiencyRating +
+                ", modularity=" + modularity +
+                ", size=" + size +
+                ", connectors=" + connectors +
+                ", manufacturer='" + manufacturer + '\'' +
+                ", EAN='" + EAN + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", launchDate=" + launchDate +
+                '}';
     }
 }

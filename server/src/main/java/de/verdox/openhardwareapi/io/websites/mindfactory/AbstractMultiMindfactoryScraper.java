@@ -8,16 +8,20 @@ import org.jsoup.nodes.Element;
 
 import java.util.*;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 
-public abstract class AbstractMultiMindfactoryScraper<HARDWARE extends HardwareSpec> extends MultiPageHardwareScraper<HARDWARE> {
-    public AbstractMultiMindfactoryScraper(String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
-        super(baseUrl, singlePageHardwareScraper);
-        seleniumBasedWebScraper.setIsChallengePage(document -> document.selectFirst("div.security-content") != null);
-        singlePageHardwareScraper.getSeleniumBasedWebScraper().setIsChallengePage(document -> document.selectFirst("div.security-content") != null);
+public abstract class AbstractMultiMindfactoryScraper<HARDWARE extends HardwareSpec<HARDWARE>> extends MultiPageHardwareScraper<HARDWARE> {
+
+    public static final BiPredicate<String, Document> CHALLENGE_PREDICATE = (url, document) -> document.selectFirst("div.security-content") != null;
+
+    public AbstractMultiMindfactoryScraper(String id, String baseUrl, SinglePageHardwareScraper<HARDWARE> singlePageHardwareScraper) {
+        super(id, baseUrl, singlePageHardwareScraper);
+        seleniumBasedWebScraper.setIsChallengePage(CHALLENGE_PREDICATE);
+        singlePageHardwareScraper.getSeleniumBasedWebScraper().setIsChallengePage(CHALLENGE_PREDICATE);
     }
 
     @Override
-    protected void extractMultiPageURLs(Document page, Queue<String> multiPageURLs) {
+    protected void extractMultiPageURLs(String currentUrl, Document page, Queue<String> multiPageURLs) {
         for (Element element : page.select("ul.pagination")) {
             for (Element a : element.select("a")) {
                 if (a.attr("aria-label").equals("Nächste Seite")) {
@@ -29,7 +33,7 @@ public abstract class AbstractMultiMindfactoryScraper<HARDWARE extends HardwareS
     }
 
     @Override
-    protected void extractSinglePagesURLs(Document page, Set<String> singlePageURLs) {
+    protected void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
         for (Element pcontent : page.select("div.pcontent")) {
             var nextPage = pcontent.selectFirst("a.p-complete-link");
             if (nextPage != null) {
@@ -38,10 +42,16 @@ public abstract class AbstractMultiMindfactoryScraper<HARDWARE extends HardwareS
         }
     }
 
-    public static class Builder<HARDWARE extends HardwareSpec> {
+    public static class Builder<HARDWARE extends HardwareSpec<HARDWARE>> {
         private String[] urls;
         private SinglePageHardwareScraper.HardwareQuery<HARDWARE> query;
         private BiConsumer<HARDWARE, Map<String, List<String>>> logic;
+        private String id;
+
+        public Builder<HARDWARE> withId(String id) {
+            this.id = id;
+            return this;
+        }
 
         public Builder<HARDWARE> withURLs(String... urls) {
             this.urls = urls;
@@ -71,7 +81,7 @@ public abstract class AbstractMultiMindfactoryScraper<HARDWARE extends HardwareS
                 throw new IllegalStateException("No spec translation logic defined");
             }
 
-            return new AbstractMultiMindfactoryScraper<>("", new AbstractSingleMindfactoryScraper<>("", query) {
+            return new AbstractMultiMindfactoryScraper<>(id, "", new AbstractSingleMindfactoryScraper<>(id, "", query) {
                 @Override
                 protected void translateSpecsToTarget(Map<String, List<String>> specs, HARDWARE target) {
                     super.translateSpecsToTarget(specs, target);

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.verdox.openhardwareapi.model.CPU;
+import lombok.Getter;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -13,8 +14,10 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.codec.json.Jackson2JsonDecoder;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilder;
@@ -29,15 +32,19 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
  * Eine einzige Klasse für alle REST-Calls. Einfach mit Base-URL instanziieren.
  */
 public final class HardwareSpecClient {
+    private static final Logger LOGGER = Logger.getLogger(HardwareSpecClient.class.getName());
+    private static final String API_V1 = "/api/v1";
 
     private final WebClient http;
-    private final String baseUrl;
+    @Getter
+    private final String urlApiV1;
     private final ObjectMapper om;
 
     /**
@@ -51,11 +58,13 @@ public final class HardwareSpecClient {
      * Variante mit eigenem ObjectMapper (falls ihr z.B. Module/Features custom setzen wollt).
      */
     public HardwareSpecClient(String baseUrl, ObjectMapper mapper) {
-        this.baseUrl = baseUrl;
+        this.urlApiV1 = baseUrl + API_V1;
+        LOGGER.info("HardwareSpecClient created for base url " + baseUrl + " and api v1 endpoint " + trimTrailingSlash(this.urlApiV1));
         this.om = mapper;
         var httpClient = HttpClient.create().responseTimeout(Duration.ofSeconds(15));
         this.http = WebClient.builder()
-                .baseUrl(trimTrailingSlash(baseUrl))
+                .exchangeStrategies(ExchangeStrategies.builder().codecs(clientCodecConfigurer -> clientCodecConfigurer.defaultCodecs().maxInMemorySize((int) DataSize.ofMegabytes(16).toBytes())).build())
+                .baseUrl(trimTrailingSlash(this.urlApiV1))
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .codecs(c -> c.defaultCodecs().jackson2JsonDecoder(new Jackson2JsonDecoder(mapper)))
@@ -197,6 +206,35 @@ public final class HardwareSpecClient {
                 .block();
     }
 
+    public PagesMeta pages(String type, int size) {
+        // 1) HEAD /specs/{type}?size=...
+        String headUri = uriBuilder("/specs/{type}", b -> b.queryParam("size", size), type);
+
+        return http.method(org.springframework.http.HttpMethod.HEAD)
+                .uri(headUri)
+                .exchangeToMono(resp -> {
+                    HttpStatus status = HttpStatus.resolve(resp.statusCode().value());
+                    if (status.is2xxSuccessful() || status == HttpStatus.NO_CONTENT) {
+                        HttpHeaders h = resp.headers().asHttpHeaders();
+                        long totalElements = parseLongHeader(h, "X-Total-Elements", -1L);
+                        int totalPages = parseIntHeader(h, "X-Total-Pages", -1);
+                        int pageSize = parseIntHeader(h, "X-Page-Size", size);
+
+                        if (totalElements >= 0 && totalPages >= 0) {
+                            return Mono.just(new PagesMeta(totalElements, pageSize, totalPages));
+                        }
+                        // Server liefert HEAD ohne Header? -> Fallback auf GET
+                        return fetchPagesMetaViaGet(type, size);
+                    }
+                    // Fallback auf GET bei 404/405 etc.
+                    if (status == HttpStatus.NOT_FOUND || status == HttpStatus.METHOD_NOT_ALLOWED) {
+                        return fetchPagesMetaViaGet(type, size);
+                    }
+                    return toProblem(resp).flatMap(Mono::error);
+                })
+                .block();
+    }
+
     /* =========================================================
        ========              Helpers                     =======
        ========================================================= */
@@ -229,20 +267,19 @@ public final class HardwareSpecClient {
      * Kleine Convenience: URI zusammenbauen mit QueryParams.
      */
     private String uriBuilder(String path, java.util.function.Consumer<UriBuilder> c, Object... vars) {
-        var factory = new DefaultUriBuilderFactory(baseUrl); // <---- baseUrl direkt verwenden
+        var factory = new DefaultUriBuilderFactory(urlApiV1);
         var builder = factory.builder().path(path);
         c.accept(builder);
-        // Wir geben nur den relativen Teil zurück, weil WebClient die baseUrl schon kennt
         String abs = builder.build(vars).toString();
-        return abs.replaceFirst("^" + java.util.regex.Pattern.quote(baseUrl), "");
+        return abs.replaceFirst("^" + java.util.regex.Pattern.quote(urlApiV1), "");
     }
 
     private String uriBuilder(String path, java.util.function.Consumer<UriBuilder> c) {
-        var factory = new DefaultUriBuilderFactory(baseUrl);
+        var factory = new DefaultUriBuilderFactory(urlApiV1);
         var builder = factory.builder().path(path);
         c.accept(builder);
         String abs = builder.build().toString();
-        return abs.replaceFirst("^" + java.util.regex.Pattern.quote(baseUrl), "");
+        return abs.replaceFirst("^" + java.util.regex.Pattern.quote(urlApiV1), "");
     }
 
     /**
@@ -266,37 +303,9 @@ public final class HardwareSpecClient {
     }
 
     // ===== Transport-Typ =====
-    public record PagesMeta(long totalElements, int pageSize, int totalPages) {}
-
-    // ===== Public API =====
-    public PagesMeta pages(String type, int size) {
-        // 1) HEAD /specs/{type}?size=...
-        String headUri = uriBuilder("/specs/{type}", b -> b.queryParam("size", size), type);
-
-        return http.method(org.springframework.http.HttpMethod.HEAD)
-                .uri(headUri)
-                .exchangeToMono(resp -> {
-                    HttpStatus status = HttpStatus.resolve(resp.statusCode().value());
-                    if (status.is2xxSuccessful() || status == HttpStatus.NO_CONTENT) {
-                        HttpHeaders h = resp.headers().asHttpHeaders();
-                        long totalElements = parseLongHeader(h, "X-Total-Elements", -1L);
-                        int totalPages    = parseIntHeader(h, "X-Total-Pages", -1);
-                        int pageSize      = parseIntHeader(h, "X-Page-Size", size);
-
-                        if (totalElements >= 0 && totalPages >= 0) {
-                            return Mono.just(new PagesMeta(totalElements, pageSize, totalPages));
-                        }
-                        // Server liefert HEAD ohne Header? -> Fallback auf GET
-                        return fetchPagesMetaViaGet(type, size);
-                    }
-                    // Fallback auf GET bei 404/405 etc.
-                    if (status == HttpStatus.NOT_FOUND || status == HttpStatus.METHOD_NOT_ALLOWED) {
-                        return fetchPagesMetaViaGet(type, size);
-                    }
-                    return toProblem(resp).flatMap(Mono::error);
-                })
-                .block();
+    public record PagesMeta(long totalElements, int pageSize, int totalPages) {
     }
+
 
     // ===== Fallback GET /specs/{type}/pages?size=... =====
     private Mono<PagesMeta> fetchPagesMetaViaGet(String type, int size) {
@@ -315,10 +324,19 @@ public final class HardwareSpecClient {
 
     // ===== kleine Header-Parser =====
     private static long parseLongHeader(HttpHeaders h, String name, long def) {
-        try { return Long.parseLong(h.getFirst(name)); } catch (Exception e) { return def; }
+        try {
+            return Long.parseLong(h.getFirst(name));
+        } catch (Exception e) {
+            return def;
+        }
     }
+
     private static int parseIntHeader(HttpHeaders h, String name, int def) {
-        try { return Integer.parseInt(h.getFirst(name)); } catch (Exception e) { return def; }
+        try {
+            return Integer.parseInt(h.getFirst(name));
+        } catch (Exception e) {
+            return def;
+        }
     }
 
 
@@ -379,18 +397,15 @@ public final class HardwareSpecClient {
     }
 
     public static void main(String[] args) {
-        var client = new HardwareSpecClient("http://localhost:8080/api/v1");
+        var client = new HardwareSpecClient("http://localhost:5050");
 
-        List<String> types = client.listTypes();
-        System.out.println(types);
+        List<CPU> cpu = client.list("cpu", 0, 100, "id,asc", CPU.class).content();
+        System.out.println("Received: "+cpu.size());
 
-        var page = client.list("cpu", 0, 100, "id,asc", CPU.class);
-        System.out.println(page);
-
-        CPU cpu = client.getOne("0730143314442","cpu", CPU.class);
-        System.out.println(cpu);
-
-       // GPU saved = client.uploadOne("gpu", gpu, GPU.class);
+        if(!cpu.isEmpty()) {
+            System.out.println("Uploading: "+cpu);
+            client.uploadOne("cpu", cpu.getFirst(), CPU.class);
+        }
 
     }
 }

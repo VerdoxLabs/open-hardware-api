@@ -17,13 +17,24 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PCCase extends HardwareSpec {
+public class PCCase extends HardwareSpec<PCCase> {
+
+    @Override
+    public void merge(PCCase other) {
+        super.merge(other);
+        mergeEnum(other, PCCase::getSizeClass, PCCase::setSizeClass, HardwareTypes.CaseSizeClass.UNKNOWN);
+        merge(other, PCCase::getDimensions, PCCase::setDimensions, dimensionsMm -> dimensionsMm == null || (dimensionsMm.getDepth() == 0 || dimensionsMm.getHeight() == 0 || dimensionsMm.getWidth() == 0));
+        mergeSet(other, PCCase::getMotherboardSupport);
+        mergeNumber(other, PCCase::getMaxGpuLengthMm, PCCase::setMaxGpuLengthMm);
+        mergeNumber(other, PCCase::getMaxCpuCoolerHeightMm, PCCase::setMaxCpuCoolerHeightMm);
+    }
+
     @Enumerated(EnumType.STRING)
     private HardwareTypes.CaseSizeClass sizeClass = HardwareTypes.CaseSizeClass.MID_TOWER;
 
 
     @Embedded
-    private DimensionsMm dimensions = new DimensionsMm(0d,0d,0d);
+    private DimensionsMm dimensions = new DimensionsMm(0d, 0d, 0d);
 
 
     @ElementCollection(fetch = FetchType.EAGER)
@@ -39,11 +50,6 @@ public class PCCase extends HardwareSpec {
 
     @PositiveOrZero
     private double maxCpuCoolerHeightMm = 0;
-
-    @Override
-    public String toString() {
-        return "PCCase{" + "sizeClass=" + sizeClass + ", dimensions=" + dimensions + ", motherboardSupport=" + motherboardSupport + ", maxGpuLengthMm=" + maxGpuLengthMm + ", maxCpuCoolerHeightMm=" + maxCpuCoolerHeightMm + ", manufacturer='" + manufacturer + '\'' + ", model='" + model + '\'' + ", launchDate=" + launchDate + ", tags=" + tags + ", attributes=" + attributes + '}';
-    }
 
     public static HardwareTypes.CaseSizeClass classify(DimensionsMm d) {
         double height = d.getHeight();
@@ -63,5 +69,22 @@ public class PCCase extends HardwareSpec {
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Override
+    public String toString() {
+        return "PCCase{" +
+                "EAN='" + EAN + '\'' +
+                ", sizeClass=" + sizeClass +
+                ", dimensions=" + dimensions +
+                ", motherboardSupport=" + motherboardSupport +
+                ", maxGpuLengthMm=" + maxGpuLengthMm +
+                ", maxCpuCoolerHeightMm=" + maxCpuCoolerHeightMm +
+                ", manufacturer='" + manufacturer + '\'' +
+                ", model='" + model + '\'' +
+                ", MPN='" + MPN + '\'' +
+                ", UPC='" + UPC + '\'' +
+                ", launchDate=" + launchDate +
+                '}';
     }
 }

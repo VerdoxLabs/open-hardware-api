@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import de.verdox.openhardwareapi.BadRequestException;
 import de.verdox.openhardwareapi.component.repository.HardwareSpecificRepo;
 import de.verdox.openhardwareapi.component.service.HardwareSpecService;
+import de.verdox.openhardwareapi.component.service.ScrapingService;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -21,12 +22,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 
 @RestController
 @RequestMapping("/api/v1/specs")
 public class APISpecUploadController {
     private final ObjectMapper om;
-/*    private final javax.validation.Validator validator;*/
+    /*    private final javax.validation.Validator validator;*/
     private final HardwareSpecService hardwareSpecService;
 
     public APISpecUploadController(ObjectMapper om, /*javax.validation.Validator validator, */HardwareSpecService hardwareSpecService) {
@@ -38,7 +40,7 @@ public class APISpecUploadController {
     // ---------- Single ----------
     @PostMapping(path = "/{type}", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Transactional
-    public <HARDWARE extends HardwareSpec> ResponseEntity<?> uploadOne(@PathVariable String type, @RequestBody String json) {
+    public <HARDWARE extends HardwareSpec<HARDWARE>> ResponseEntity<?> uploadOne(@PathVariable String type, @RequestBody String json) {
         if (!hardwareSpecService.isValidType(type)) {
             throw new IllegalArgumentException("Invalid type:" + type);
         }
@@ -48,7 +50,10 @@ public class APISpecUploadController {
         HARDWARE entity = readStrict(json, hardwareType);
         validateOrThrow(entity);
 
-        var saved = repo.save(entity);
+        entity.setModel(null);
+
+        ScrapingService.LOGGER.log(Level.FINE, "Received merge for " + entity);
+        var saved = hardwareSpecService.merge(entity);
         URI location = URI.create("/api/v1/specs/%s/%d".formatted(type, saved.getId()));
         return ResponseEntity.created(location).body(saved);
     }
@@ -56,8 +61,8 @@ public class APISpecUploadController {
     // ---------- Bulk (JSON-Array oder NDJSON) ----------
     @PostMapping(path = "/{type}/bulk", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Transactional
-    public <HARDWARE extends HardwareSpec> ResponseEntity<?> uploadBulk(@PathVariable String type, @RequestBody String body,
-                                                                        @RequestParam(defaultValue = "true") boolean allOrNothing) {
+    public <HARDWARE extends HardwareSpec<HARDWARE>> ResponseEntity<?> uploadBulk(@PathVariable String type, @RequestBody String body,
+                                                                                  @RequestParam(defaultValue = "true") boolean allOrNothing) {
         if (!hardwareSpecService.isValidType(type)) {
             throw new IllegalArgumentException("Invalid type:" + type);
         }
@@ -79,19 +84,20 @@ public class APISpecUploadController {
             }
         }
 
-        List<HARDWARE> saved = repo.saveAll(toSave);
+        hardwareSpecService.mergeAll(hardwareType, toSave);
+        ScrapingService.LOGGER.log(Level.INFO, "Received " + toSave.size() + " for merging");
 
         if (!errors.isEmpty()) {
             // 207 Multi-Status ähnlich — hier 200 mit gemischtem Ergebnis
             Map<String, Object> result = Map.of(
-                    "savedCount", saved.size(),
+                    "savedCount", toSave.size(),
                     "failedCount", errors.size(),
                     "errors", errors
             );
             return ResponseEntity.status(HttpStatus.OK).body(result);
         }
 
-        return ResponseEntity.ok(Map.of("savedCount", saved.size()));
+        return ResponseEntity.ok(Map.of("savedCount", toSave.size()));
     }
 
     // ---------- Optional: Datei-Upload (Array oder NDJSON im File) ----------

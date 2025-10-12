@@ -8,6 +8,7 @@ import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
 import de.verdox.openhardwareapi.model.GPUChip;
 import de.verdox.openhardwareapi.model.HardwareTypes;
 import de.verdox.openhardwareapi.util.GpuRegexParser;
+import org.jsoup.nodes.Document;
 
 import java.io.IOException;
 import java.net.URI;
@@ -35,8 +36,12 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
     }
 
     @Override
-    public Set<GPUChip> scrape(ScrapeListener<GPUChip> scrapeListener) throws Throwable {
-        // 1) Latest Release -> größtes JSON-Asset
+    public Set<Document> downloadWebsites() throws Throwable {
+        return Set.of();
+    }
+
+    @Override
+    public Set<GPUChip> scrape(Set<Document> pages, ScrapeListener<GPUChip> scrapeListener) throws Throwable {
         URI jsonAsset = resolveLatestJsonAssetUrl();
 
         // 2) Download
