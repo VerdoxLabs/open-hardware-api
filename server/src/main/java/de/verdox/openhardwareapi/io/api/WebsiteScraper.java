@@ -46,11 +46,16 @@ public class WebsiteScraper {
 
     public <HARDWARE extends HardwareSpec<HARDWARE>> WebsiteScraper withScrape(String id, Supplier<HARDWARE> constructor, Consumer<SpecificScrape<HARDWARE>> builder) {
         SpecificScrape<HARDWARE> specificScrape = new SpecificScrape<>(id, EAN -> {
-            HARDWARE found = service.findByEAN(EAN);
-            if (found == null) {
+            try {
+                HARDWARE found = service.findByEAN(EAN);
+                if (found == null) {
+                    return constructor.get();
+                }
+                return found;
+            } catch (Exception e) {
+                ScrapingService.LOGGER.log(Level.SEVERE, "An exception occured while scraping " + EAN + " in " + domain + " [" + id + "]", e);
                 return constructor.get();
             }
-            return found;
         });
         builder.accept(specificScrape);
         scrapes.add(specificScrape);
@@ -180,11 +185,16 @@ public class WebsiteScraper {
             if (mainEntry != null) {
                 var main = new WebsiteCatalogScraper<HARDWARE>(domain, mainEntry.subId, mainEntry.urls) {
                     @Override
+                    public String id() {
+                        return mainEntry.subId;
+                    }
+
+                    @Override
                     public Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable {
                         HARDWARE hw = extractHardware(scrapedSpecs);
                         mainEntry.scrapeLogic().accept(scrapedSpecs, hw);
                         try {
-                            if(HardwareSpecService.sanitizeBeforeSave(hw)) {
+                            if (HardwareSpecService.sanitizeBeforeSave(hw)) {
                                 onScrape.onScrape(hw);
                                 return Optional.of(hw);
                             }
@@ -206,13 +216,18 @@ public class WebsiteScraper {
             for (Entry<HARDWARE> entry : entries) {
                 set.add(new WebsiteCatalogScraper<>(domain, entry.subId, entry.urls) {
                     @Override
+                    public String id() {
+                        return entry.subId;
+                    }
+
+                    @Override
                     public Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable {
                         HARDWARE hw = extractHardware(scrapedSpecs);
 
                         mainEntry.scrapeLogic().accept(scrapedSpecs, hw);
                         entry.scrapeLogic().accept(scrapedSpecs, hw);
                         try {
-                            if(HardwareSpecService.sanitizeBeforeSave(hw)) {
+                            if (HardwareSpecService.sanitizeBeforeSave(hw)) {
                                 onScrape.onScrape(hw);
                                 return Optional.of(hw);
                             }
@@ -254,8 +269,19 @@ public class WebsiteScraper {
                 hw.setMPN(MPN);
             }
 
-            String model = scrapedSpecs.specs().getOrDefault("model", List.of("")).getFirst();
-            String manufacturer = scrapedSpecs.specs().getOrDefault("manufacturer", List.of("")).getFirst();
+            var mod = scrapedSpecs.specs().getOrDefault("model", List.of(""));
+            var manu = scrapedSpecs.specs().getOrDefault("manufacturer", List.of(""));
+
+            String model = "";
+            String manufacturer = "";
+
+            if(mod != null) {
+                model = !mod.isEmpty() ? mod.getFirst() : "";
+            }
+            if(manu != null) {
+                manufacturer = !manu.isEmpty() ? manu.getFirst() : "";
+            }
+
 
 
             if (!model.isBlank()) {

@@ -30,7 +30,13 @@ public class CasekingScrapingStrategy implements WebsiteScrapingStrategy {
         for (Element element : page.select("div.product-tiles")) {
             var nextPage = element.selectFirst("a.badge-group-wrapper");
             if (nextPage != null) {
-                singlePageURLs.add("https://www.caseking.de" + nextPage.attr("href"));
+                String nextUrl = nextPage.attr("href");
+                if(nextUrl.contains("https://www.caseking.de")) {
+                    singlePageURLs.add(nextPage.attr("href"));
+                }
+                else {
+                    singlePageURLs.add("https://www.caseking.de" + nextPage.attr("href"));
+                }
             }
         }
     }

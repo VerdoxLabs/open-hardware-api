@@ -11,6 +11,9 @@ public class XKomScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "x-kom.de")
                 .withStrategy(new XKomScrapingStrategy())
+                .withShouldSavePredicate((s, document) -> {
+                    return document.selectFirst("div.page-wrapper") != null;
+                })
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {
                     var specs = scrapedSpecs.specs();
                     if (specs.containsKey("Hersteller")) {

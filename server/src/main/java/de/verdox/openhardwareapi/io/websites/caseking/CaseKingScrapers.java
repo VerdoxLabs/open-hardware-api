@@ -19,6 +19,12 @@ public class CaseKingScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "caseking.de")
                 .withStrategy(new CasekingScrapingStrategy())
+                .withChallengePageDetection((s, document) -> {
+                    return document.selectFirst("p#Truv1") != null;
+                })
+                .withShouldSavePredicate((s, document) -> {
+                    return document.selectFirst("div#maincontent") != null;
+                })
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {
                     // Caseking: mappe "HERSTELLER" auf unser "manufacturer"
                     scrapedSpecs.specs().put("manufacturer", scrapedSpecs.specs().get("HERSTELLER"));

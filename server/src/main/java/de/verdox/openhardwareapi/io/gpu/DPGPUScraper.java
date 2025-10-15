@@ -71,6 +71,11 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
     }
 
     @Override
+    public String id() {
+        return "DB-GPU-Scraper";
+    }
+
+    @Override
     public Stream<ScrapedSpecPage> downloadWebsites() throws Throwable {
         return Stream.empty();
     }

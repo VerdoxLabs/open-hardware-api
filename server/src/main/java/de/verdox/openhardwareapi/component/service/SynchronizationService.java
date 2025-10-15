@@ -11,7 +11,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,14 +28,20 @@ public class SynchronizationService {
     private final HardwareSpecService hardwareSpecService;
     private final SynchronizationConfig configStore;
 
-    /** Aktive Clients (thread-safe über rebuild und danach read-mostly) */
+    /**
+     * Aktive Clients (thread-safe über rebuild und danach read-mostly)
+     */
     private final Set<HardwareSpecClient> clients = ConcurrentHashMap.newKeySet();
 
-    /** Double-Buffer: aktiver Sammel-Puffer (Key -> HardwareSpec) */
+    /**
+     * Double-Buffer: aktiver Sammel-Puffer (Key -> HardwareSpec)
+     */
     private final AtomicReference<ConcurrentMap<String, HardwareSpec<?>>> activeBuffer =
             new AtomicReference<>(new ConcurrentHashMap<>());
 
-    /** Worker-Executor für Sync (Single-Thread, bewahrt Reihenfolge) */
+    /**
+     * Worker-Executor für Sync (Single-Thread, bewahrt Reihenfolge)
+     */
     private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "sync-worker");
         t.setDaemon(true);
@@ -84,6 +93,9 @@ public class SynchronizationService {
 
     @SuppressWarnings("unchecked")
     public <HARDWARE extends HardwareSpec<HARDWARE>> void syncSingleToNodes(HARDWARE hardwareSpec) {
+        if (clients.isEmpty()) {
+            return;
+        }
         Class<HARDWARE> clazz = (Class<HARDWARE>) hardwareSpec.getClass();
         String type = hardwareSpecService.getTypeAsString(clazz);
         LOGGER.log(Level.INFO, "Syncing {0} to remote nodes", hardwareSpec.getEAN());
@@ -93,7 +105,7 @@ public class SynchronizationService {
             } catch (Throwable ex) {
                 LOGGER.log(Level.WARNING,
                         String.format("Sync to %s failed for %s %s: %s",
-                                client, type, safeKeyOf(hardwareSpec), ex.toString()), ex);
+                                client, type, safeKeyOf(hardwareSpec), ex), ex);
             }
         }
     }
@@ -102,7 +114,9 @@ public class SynchronizationService {
     // Asynchrones Queueing + Flush
     // ---------------------------------------------------------------
 
-    /** Nicht-blockierend: legt/überschreibt den Eintrag im aktiven Buffer. */
+    /**
+     * Nicht-blockierend: legt/überschreibt den Eintrag im aktiven Buffer.
+     */
     public <HARDWARE extends HardwareSpec<HARDWARE>> void addToSyncQueue(HARDWARE hardwareSpec) {
         if (hardwareSpec == null) return;
         Class<HARDWARE> clazz = (Class<HARDWARE>) hardwareSpec.getClass();
@@ -115,14 +129,21 @@ public class SynchronizationService {
         }
     }
 
-    /** Periodischer Flush (Hintergrund-Task) */
+    /**
+     * Periodischer Flush (Hintergrund-Task)
+     */
     @Scheduled(fixedDelayString = "${sync.flush-interval-ms:5000}")
     public void scheduledFlush() {
         triggerFlushAsync();
     }
 
-    /** Atomic Swap + Übergabe an Worker-Thread. */
+    /**
+     * Atomic Swap + Übergabe an Worker-Thread.
+     */
     private void triggerFlushAsync() {
+        if (clients.isEmpty()) {
+            return;
+        }
         ConcurrentMap<String, HardwareSpec<?>> drained =
                 activeBuffer.getAndSet(new ConcurrentHashMap<>());
 
@@ -145,39 +166,41 @@ public class SynchronizationService {
         List<HardwareSpec<?>> all = new ArrayList<>(batch.values());
         Map<String, List<HardwareSpec<?>>> byType = new HashMap<>();
 
+
+
         for (HardwareSpec<?> spec : all) {
-            String type = hardwareSpecService.getTypeAsString((Class<? extends HardwareSpec<?>>) spec.getClass());
+            Class<HardwareSpec<?>> clazz = (Class<HardwareSpec<?>>) spec.getClass();
+            String type = hardwareSpecService.getTypeAsString(clazz);
             byType.computeIfAbsent(type, t -> new ArrayList<>()).add(spec);
         }
 
+        A:
         for (HardwareSpecClient client : clients) {
+            int counter = 0;
             for (Map.Entry<String, List<HardwareSpec<?>>> e : byType.entrySet()) {
                 String type = e.getKey();
                 List<HardwareSpec<?>> specsOfType = e.getValue();
 
                 for (List<HardwareSpec<?>> chunk : partition(specsOfType, bulkMaxBatchSize)) {
-                    try {
-                        HardwareSpecClient.BulkResult result = client.bulkUpload(type, (List<?>) chunk, bulkAllOrNothing);
-                        logBulkResult(client, type, chunk.size(), result);
-
-                        if (result != null && !bulkAllOrNothing && hasFailures(result)) {
-                            fallbackSingleForFailures(client, type, chunk, result);
-                        }
-                    } catch (Throwable ex) {
-                        LOGGER.log(Level.SEVERE, String.format(
-                                "Bulk upload failed @ %s type=%s chunkSize=%d -> %s",
-                                client, type, chunk.size(), ex));
-
-                        if (bulkAllOrNothing) {
-                            fallbackSingleAll(client, type, chunk);
+                    for (HardwareSpec<?> hardwareSpec : chunk) {
+                        Class<HardwareSpec<?>> clazz = (Class<HardwareSpec<?>>) hardwareSpec.getClass();
+                        try {
+                            client.uploadOne(type, hardwareSpec, clazz);
+                            counter++;
+                        } catch (Throwable ex) {
+                            LOGGER.log(Level.SEVERE, String.format(
+                                    "Upload failed @ EAN=%s model=%s",
+                                    hardwareSpec.getEAN(), hardwareSpec.getModel()), ex);
+                            break A;
                         }
                     }
                 }
             }
+            LOGGER.log(Level.INFO, "Synced " + counter + " to " + client.getUrlApiV1());
         }
 
         long dur = System.currentTimeMillis() - start;
-        LOGGER.log(Level.INFO, "Bulk flush done: {0} specs in {1} ms.", new Object[]{total, dur});
+        //LOGGER.log(Level.INFO, "Bulk flush done: {0} specs in {1} ms.", new Object[]{total, dur});
     }
 
     // ---------------------------------------------------------------
@@ -226,7 +249,7 @@ public class SynchronizationService {
                 } catch (Throwable ex) {
                     LOGGER.log(Level.WARNING, String.format(
                             "Fallback single upload failed for %s @ %s: %s",
-                            safeKeyOf(spec), client, ex.toString()), ex);
+                            safeKeyOf(spec), client, ex), ex);
                 }
             }
         }
@@ -240,7 +263,7 @@ public class SynchronizationService {
             } catch (Throwable ex) {
                 LOGGER.log(Level.WARNING, String.format(
                         "Fallback single upload (all) failed for %s @ %s: %s",
-                        safeKeyOf(spec), client, ex.toString()), ex);
+                        safeKeyOf(spec), client, ex), ex);
             }
         }
     }

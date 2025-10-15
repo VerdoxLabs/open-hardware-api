@@ -50,8 +50,6 @@ public class APISpecUploadController {
         HARDWARE entity = readStrict(json, hardwareType);
         validateOrThrow(entity);
 
-        entity.setModel(null);
-
         ScrapingService.LOGGER.log(Level.FINE, "Received merge for " + entity);
         var saved = hardwareSpecService.merge(entity);
         URI location = URI.create("/api/v1/specs/%s/%d".formatted(type, saved.getId()));

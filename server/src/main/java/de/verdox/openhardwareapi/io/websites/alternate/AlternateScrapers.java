@@ -9,6 +9,12 @@ public class AlternateScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "alternate.de")
                 .withStrategy(new AlternateScrapingStrategy())
+                .withChallengePageDetection((s, document) -> {
+                    return document.selectFirst("p#Truv1") != null;
+                })
+                .withShouldSavePredicate((s, document) -> {
+                    return document.selectFirst("body#mainContent") != null;
+                })
 
                 .withCPUScrape(scrape -> scrape
                         .addMainScrapeLogic((scrapedSpecs, target) -> {

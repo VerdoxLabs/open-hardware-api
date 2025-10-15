@@ -13,7 +13,7 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
             for (Element a : mt2.select("a")) {
                 if (a.attr("aria-label").equals("Nächste Seite")) {
                     String linkToNextPage = a.attr("href");
-                    multiPageURLs.add("https://www.alternate.at" + linkToNextPage);
+                    multiPageURLs.add(linkToNextPage);
                     break;
                 }
             }
@@ -22,7 +22,7 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
 
     @Override
     public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
-        for (Element containerListing : page.select("div.grid-container listing")) {
+        for (Element containerListing : page.select("div.grid-container.listing")) {
             var a = containerListing.selectFirst("a");
             if (a == null) {
                 continue;
@@ -58,7 +58,7 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
         }
 
 
-        var productDetails = page.selectFirst("div.card nav-product-details");
+        var productDetails = page.selectFirst("div.card.nav-product-details");
         for (Element tr : productDetails.select("tr")) {
             var columnTitleTr = tr.selectFirst("td.c1");
             var columnSubTitleTr = tr.selectFirst("td.c2");

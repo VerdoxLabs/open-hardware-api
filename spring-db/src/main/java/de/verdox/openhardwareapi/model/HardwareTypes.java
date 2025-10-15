@@ -1,11 +1,13 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Getter;
 
 import java.util.Set;
 
 public class HardwareTypes {
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum Chipset {
         UNKNOWN,
         // Intel LGA1150 (Haswell / Broadwell)
@@ -34,6 +36,7 @@ public class HardwareTypes {
         SP3_PLATFORM
     }
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Getter
     public enum DisplayPanel {
         UNKNOWN("Unknown"),
@@ -47,6 +50,7 @@ public class HardwareTypes {
         }
     }
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Getter
     public enum DisplaySync {
         G_SYNC("G-Sync"), FREE_SYNC("Free Sync");
@@ -57,6 +61,7 @@ public class HardwareTypes {
         }
     }
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Getter
     public enum CpuSocket {
         UNKNOWN, FP5, sTR4, FT5, FP4, FP6, FP7, FP8, FP9, FP10, FP11,
@@ -95,21 +100,22 @@ public class HardwareTypes {
     }
 
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum RamType {UNKNOWN, DDR5, DDR4, DDR3, DDR2, DDR}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum StorageType {UNKNOWN, HDD, SSD}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum StorageInterface {UNKNOWN, SATA, NVME}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PcieVersion {UNKNOWN, GEN1, GEN2, GEN3, GEN4, GEN5, GEN6}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum CoolerType {UNKNOWN, AIR, AIO_LIQUID}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Getter
     public enum MotherboardFormFactor {
         UNKNOWN("Unknown"), ITX("ITX"), M_ATX("Micro-ATX"), ATX("ATX"), E_ATX("E-ATX");
@@ -120,16 +126,19 @@ public class HardwareTypes {
         }
     }
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PSU_MODULARITY {UNKNOWN, NON_MODULAR, SEMI_MODULAR, FULL_MODULAR}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PsuEfficiencyRating {UNKNOWN, NONE, BRONZE, SILVER, GOLD, PLATINUM, TITANIUM}
 
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum CaseSizeClass {UNKNOWN, MINI_ITX, MICRO_ATX, MID_TOWER, FULL_TOWER}
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum VRAM_TYPE {UNKNOWN, GDDR, GDDR2, GDDR3, GDDR4, GDDR5, GDDR5X, GDDR6, GDDR6X, HBM1, HBM2, HBM3, HBM2E, LPDDR5, DDR5, DDR4}
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PowerConnectorType {
         // Mainboard / CPU
         ATX_24_PIN, EPS_4_PIN, EPS_8_PIN, EPS_4_PLUS_4_PIN,
@@ -150,35 +159,41 @@ public class HardwareTypes {
     /**
      * USB Anschluss-Typ (Bauform/Stecker)
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum UsbConnectorType {USB_A, USB_C, INTERNAL_HEADER_9PIN, INTERNAL_HEADER_19PIN, USB_C_HEADER}
 
 
     /**
      * USB Protokoll-/Versionsfamilie
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum UsbVersion {USB2_0, USB3_0, USB3_1, USB3_2_GEN1, USB3_2_GEN2, USB3_2_GEN2x2, USB4, THUNDERBOLT4}
 
 
     /**
      * Position der Ports
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PortLocation {REAR_IO, FRONT_HEADER}
 
 
     /**
      * Ethernet-Geschwindigkeit
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum EthernetSpeed {ETH_1G, ETH_2_5G, ETH_5G, ETH_10G}
 
 
     /**
      * WLAN-Standard
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum WifiStandard {WIFI4_80211N, WIFI5_80211AC, WIFI6_80211AX, WIFI6E_80211AX_6GHZ, WIFI7_80211BE}
 
 
     /**
      * Display-Ausgangs-Typen am Board
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum DisplayOutputType {HDMI, DISPLAYPORT, DVI, VGA}
 }

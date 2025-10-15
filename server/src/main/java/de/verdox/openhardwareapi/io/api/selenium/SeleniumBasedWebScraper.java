@@ -114,7 +114,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
             ScrapingService.LOGGER.log(Level.INFO, "Challenge page detected for URL: " + canonUrl);
             try {
-                Thread.sleep(10000);
+                Thread.sleep(1000);
                 HtmlSlimmer.slimHtml(webDriver.getPageSource(), canonUrl, new HtmlSlimmer.Options());
             } catch (InterruptedException e) {
 

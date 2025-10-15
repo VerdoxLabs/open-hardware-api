@@ -13,6 +13,9 @@ public class ComputerSalgScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "computersalg.de")
                 .withStrategy(new ComputerSalgScrapingStrategy())
+                .withShouldSavePredicate((s, document) -> {
+                    return document.selectFirst("div#MasterParentContainer") != null;
+                })
 
                 // CPU
                 .withCPUScrape(cpu -> cpu.addMainScrapeLogic((scraped, target) -> {

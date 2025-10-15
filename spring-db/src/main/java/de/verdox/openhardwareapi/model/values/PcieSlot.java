@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model.values;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.HardwareTypes;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.EnumType;
@@ -15,6 +16,7 @@ import lombok.*;
 @NoArgsConstructor
 public class PcieSlot {
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PcieVersion version;
 
     @Positive

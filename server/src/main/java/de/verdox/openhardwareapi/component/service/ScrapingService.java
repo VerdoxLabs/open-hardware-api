@@ -89,12 +89,14 @@ public class ScrapingService {
     private List<ComponentWebScraper<? extends HardwareSpec<?>>> setupScrapers() {
         List<ComponentWebScraper<? extends HardwareSpec<?>>> scrapers = new ArrayList<>();
 
-        scrapers.addAll(XKomScrapers.create(hardwareSpecService).buildScrapers());
-        scrapers.addAll(MindfactoryScrapers.create(hardwareSpecService).buildScrapers());
-        scrapers.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
-        scrapers.addAll(ComputerSalgScrapers.create(hardwareSpecService).buildScrapers());
         scrapers.addAll(CaseKingScrapers.create(hardwareSpecService).buildScrapers());
         scrapers.addAll(AlternateScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(XKomScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(ComputerSalgScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(MindfactoryScrapers.create(hardwareSpecService).buildScrapers());
+
+
 
 
         scrapers.add(new DPGPUScraper(hardwareSpecService));

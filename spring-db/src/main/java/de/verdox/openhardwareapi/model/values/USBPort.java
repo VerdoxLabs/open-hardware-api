@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model.values;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.HardwareTypes;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.EnumType;
@@ -15,9 +16,11 @@ import lombok.*;
 @NoArgsConstructor
 public class USBPort {
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.UsbConnectorType type;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.UsbVersion version;
 
     @Positive

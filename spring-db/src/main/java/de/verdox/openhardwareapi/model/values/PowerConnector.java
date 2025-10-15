@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model.values;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.HardwareTypes;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
@@ -17,7 +18,9 @@ import lombok.*;
 public class PowerConnector {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PowerConnectorType type; // z.B. "PCIe 8-pin", "ATX 24-pin"
+
     @Positive
     private Integer quantity;
 }

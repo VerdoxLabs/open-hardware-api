@@ -22,6 +22,8 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
     WebsiteScrapingStrategy getWebsiteScrapingStrategy();
 
+    String id();
+
     void setWebsiteScrapingStrategy(WebsiteScrapingStrategy strategy);
 
     //TODO: Step 1

@@ -12,6 +12,7 @@ import org.jsoup.nodes.Document;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.stream.Stream;
 
@@ -52,11 +53,13 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
             try {
                 Document doc = seleniumBasedWebScraper.fetch(domain, id, nextUrl, Duration.ofDays(30));
+                Thread.sleep(1000);
                 websiteScrapingStrategy.extractMultiPageURLs(nextUrl, doc, multiPages);
                 websiteScrapingStrategy.extractSinglePagesURLs(nextUrl, doc, singlePages);
 
             } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
-
+                ScrapingService.LOGGER.log(Level.SEVERE, "Challenge found on domain " + domain);
+                break;
             }
         }
 
@@ -64,17 +67,28 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
         ScrapingService.LOGGER.log(Level.INFO, "Found " + singlePages.size() + " scraping pages for " + topLevelHost + " [" + id + "]");
 
+        AtomicBoolean challengeFound = new AtomicBoolean(false);
+
         return singlePages
                 .stream()
                 .filter(url -> !alreadyCollected.contains(url))
+                .filter(s -> !challengeFound.get())
                 .map(url -> {
                     try {
+                        Thread.sleep(1000);
                         return new ScrapedSpecPage(url, seleniumBasedWebScraper.fetch(domain, id, url, Duration.ofDays(90)));
-                    } catch (Throwable ex) {
+                    }
+                    catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
+                        challengeFound.set(true);
+                        ScrapingService.LOGGER.log(Level.SEVERE, "Challenge found on domain " + domain);
+                        return null;
+                    }
+                    catch (Throwable ex) {
                         ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape single page " + url, ex);
                         return null;
                     } finally {
                         alreadyCollected.add(url);
+
                     }
                 }).filter(Objects::nonNull);
     }

@@ -63,7 +63,6 @@ public class RemoteSoldItemService {
     }
 
     public Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
-        ScrapingService.LOGGER.log(Level.INFO, "Fetching price history for " + EAN);
         Set<RemoteSoldItem> remoteItems = new HashSet<>();
 
         EbayScraper ebayScraper = background ? ebayBackgroundScraper : ebayInstant;
@@ -116,7 +115,7 @@ public class RemoteSoldItemService {
             repo.saveAll(scraped);
             return scraped;
         } catch (Throwable e) {
-            ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape price for " + EAN + " on " + ebayMarketplace, e.getMessage());
+            ScrapingService.LOGGER.log(Level.FINE, "Could not scrape price for " + EAN + " on " + ebayMarketplace, e);
             return List.of();
         }
     }

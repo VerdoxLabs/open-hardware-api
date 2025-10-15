@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import de.verdox.openhardwareapi.model.CPU;
 import de.verdox.openhardwareapi.model.values.Currency;
 import lombok.Getter;
@@ -285,6 +286,8 @@ public final class HardwareSpecClient {
     private static ObjectMapper defaultMapper() {
         return new ObjectMapper()
                 .findAndRegisterModules()
+                .configure(SerializationFeature.WRITE_ENUMS_USING_INDEX, false)
+                .configure(SerializationFeature.WRITE_ENUMS_USING_TO_STRING, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
