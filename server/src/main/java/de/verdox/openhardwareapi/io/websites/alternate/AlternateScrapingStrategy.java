@@ -49,6 +49,15 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
         }
         specs.put("model", List.of(title.toString()));
 
+        var logo = page.selectFirst("a.product-manufacturer-logo");
+        if (logo != null) {
+            var img = logo.selectFirst("img");
+            if (img != null) {
+                specs.put("manufacturer", List.of(img.attr("alt")));
+            }
+        }
+
+
         var productDetails = page.selectFirst("div.card nav-product-details");
         for (Element tr : productDetails.select("tr")) {
             var columnTitleTr = tr.selectFirst("td.c1");

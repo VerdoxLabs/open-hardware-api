@@ -5,9 +5,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.verdox.openhardwareapi.component.service.HardwareSpecService;
 import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
+import de.verdox.openhardwareapi.io.api.WebsiteScrapingStrategy;
 import de.verdox.openhardwareapi.model.GPUChip;
 import de.verdox.openhardwareapi.model.HardwareTypes;
 import de.verdox.openhardwareapi.util.GpuRegexParser;
+import lombok.Getter;
+import lombok.Setter;
 import org.jsoup.nodes.Document;
 
 import java.io.IOException;
@@ -22,12 +25,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
 
     private static final Logger log = Logger.getLogger(DPGPUScraper.class.getName());
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/painebenjamin/dbgpu/releases/latest";
+    @Getter @Setter
+    private WebsiteScrapingStrategy websiteScrapingStrategy;
 
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
     private final ObjectMapper om = new ObjectMapper();
@@ -35,12 +41,6 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
     public DPGPUScraper(HardwareSpecService hardwareSpecService) {
     }
 
-    @Override
-    public Set<Document> downloadWebsites() throws Throwable {
-        return Set.of();
-    }
-
-    @Override
     public Set<GPUChip> scrape(Set<Document> pages, ScrapeListener<GPUChip> scrapeListener) throws Throwable {
         URI jsonAsset = resolveLatestJsonAssetUrl();
 
@@ -68,6 +68,21 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
             idx++;
         }
         return result;
+    }
+
+    @Override
+    public Stream<ScrapedSpecPage> downloadWebsites() throws Throwable {
+        return Stream.empty();
+    }
+
+    @Override
+    public ScrapedSpecs extract(ScrapedSpecPage scrapedPage) throws Throwable {
+        return null;
+    }
+
+    @Override
+    public Optional<GPUChip> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<GPUChip> onScrape) throws Throwable {
+        return Optional.empty();
     }
 
     @Override

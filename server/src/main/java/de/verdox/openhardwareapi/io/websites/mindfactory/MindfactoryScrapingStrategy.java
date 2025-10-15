@@ -34,21 +34,26 @@ public class MindfactoryScrapingStrategy implements WebsiteScrapingStrategy {
         Map<String, List<String>> specs = new HashMap<>();
         specs.put("EAN", List.of(page.select("span.product-ean").text()));
 
-        for (Element visibleXs : page.select("div.visible-xs")) {
-            var h1 = visibleXs.selectFirst("h1");
-            if (h1 != null && h1.attr("data-original-font-size").equals("18.2")) {
-                specs.put("model", List.of(visibleXs.text()));
+        for (Element element : page.select("div.row.no-gutters.flex-md.flex-lg")) {
+            var h1 = element.selectFirst("h1");
+            if (h1 != null) {
+                specs.put("model", List.of(h1.text()));
                 break;
             }
         }
 
-        for (Element mat10 : page.select("div.mat10")) {
-            for (Element img : mat10.select("img")) {
-                String alt = img.attr("alt");
-                String title = img.attr("title");
-                if (alt.equalsIgnoreCase(title)) {
-                    specs.put("manufacturer", List.of(title));
-                }
+        if (!specs.containsKey("model")) {
+            var pageTitle = page.selectFirst("title");
+            if (pageTitle != null) {
+                specs.put("model", List.of(pageTitle.text()));
+            }
+        }
+
+        var manufacturer = page.selectFirst("li.hidden-xs.hidden-sm.pull-right.manufacturerImage");
+        if (manufacturer != null) {
+            var a = manufacturer.selectFirst("a");
+            if (a != null) {
+                specs.put("manufacturer", List.of(a.attr("title")));
             }
         }
 

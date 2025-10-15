@@ -67,7 +67,6 @@ public class GPU extends HardwareSpec<GPU> {
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

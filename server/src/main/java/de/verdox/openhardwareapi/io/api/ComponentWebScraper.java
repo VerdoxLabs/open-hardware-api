@@ -141,22 +141,34 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
     }
 
     static String topLevelHost(String url) {
+        if (url == null || url.isBlank()) return null;
+
         try {
-            return toTopLevel(URI.create(url).getHost());
+            // URL korrigieren: Leerzeichen und Sonderzeichen durch %20 usw. ersetzen
+            String safeUrl = url.replace(" ", "%20");
+            return toTopLevel(URI.create(safeUrl).getHost());
         } catch (Exception e) {
             return null;
         }
     }
 
     static String toTopLevel(String host) {
-        if (host == null) return null;
+        if (host == null || host.isBlank()) return null;
+
         try {
             var idn = InternetDomainName.from(host);
-            if (idn.isUnderPublicSuffix() || idn.hasPublicSuffix()) return idn.topPrivateDomain().toString();
+            if (idn.isUnderPublicSuffix() || idn.hasPublicSuffix()) {
+                return idn.topPrivateDomain().toString();
+            }
         } catch (Exception ignored) {
+            // ignore and fallback
         }
+
+        // --- Robust fallback ---
         String[] parts = host.split("\\.");
-        if (parts.length >= 2) return parts[parts.length - 2] + "." + parts[parts.length - 1];
+        if (parts.length >= 2) {
+            return parts[parts.length - 2] + "." + parts[parts.length - 1];
+        }
         return host;
     }
 }

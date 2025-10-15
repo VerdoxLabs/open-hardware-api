@@ -65,7 +65,6 @@ public class PSU extends HardwareSpec<PSU> {
                 ", manufacturer='" + manufacturer + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

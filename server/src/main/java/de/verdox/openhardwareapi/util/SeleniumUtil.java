@@ -11,28 +11,35 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 
 public class SeleniumUtil {
-    private static WebDriver instance;
+    private static final Map<String, WebDriver> instances = new HashMap<>();
 
-    public static WebDriver create(ChromeOptions capabilities) throws MalformedURLException {
+    public synchronized static void cleanUp() {
+        instances.forEach((s, webDriver) -> webDriver.quit());
+        instances.clear();
+    }
+
+    public synchronized static WebDriver create(String id, ChromeOptions capabilities) throws MalformedURLException {
         String pathAsString = System.getenv("SELENIUM_PROFILE");
-        if(pathAsString == null) {
-            return create(capabilities, null);
+        if (pathAsString == null) {
+            return create(id, capabilities, null);
         }
         Path path = Path.of(pathAsString);
         if (path.toFile().isDirectory()) {
-            return create(capabilities, path);
+            return create(id, capabilities, path);
         } else {
-            return create(capabilities, null);
+            return create(id, capabilities, null);
         }
     }
 
-    public static WebDriver create(ChromeOptions capabilities, Path profileToCopyAndUse) throws MalformedURLException {
-        if (instance != null) {
-            return instance;
+    public synchronized static WebDriver create(String id, ChromeOptions capabilities, Path profileToCopyAndUse) throws MalformedURLException {
+        if (instances.containsKey(id)) {
+            return instances.get(id);
         }
         // Standard-Hardening-Flags (wie bei dir)
         capabilities.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
@@ -59,19 +66,18 @@ public class SeleniumUtil {
 
         try {
             ScrapingService.LOGGER.log(Level.INFO, "Trying to create chrome driver");
-            instance = new ChromeDriver(capabilities);
+            instances.put(id, new ChromeDriver(capabilities));
         } catch (Exception e) {
             ScrapingService.LOGGER.log(Level.INFO, "Chrome driver not found on this system");
             var hub = System.getenv().getOrDefault("SELENIUM_REMOTE_URL", "http://localhost:4444");
             try {
                 ScrapingService.LOGGER.log(Level.INFO, "Creating remote selenium driver at " + hub);
-                instance = new RemoteWebDriver(URI.create(hub).toURL(), capabilities);
+                instances.put(id, new RemoteWebDriver(URI.create(hub).toURL(), capabilities));
             } catch (Throwable ex) {
                 ScrapingService.LOGGER.log(Level.WARNING, "Could not connect to remote URL " + hub + ".", ex);
-                instance = null;
             }
         }
-        return instance;
+        return instances.getOrDefault(id, null);
     }
 
     /**

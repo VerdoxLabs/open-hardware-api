@@ -31,18 +31,20 @@ public class XKomScrapingStrategy implements WebsiteScrapingStrategy {
     public Map<String, List<String>> extractSpecMap(Document page) throws Throwable {
         Map<String, List<String>> specs = new HashMap<>();
 
-        var header = page.selectFirst("div.desc_section.head_desc");
+        var header = page.selectFirst("div.page-title-wrapper.product");
         if (header != null) {
-            specs.put("model", List.of(header.selectFirst("h2").text()));
+            specs.put("model", List.of(header.selectFirst("span.base").text()));
         }
 
-        var addAttr = page.select("div.additional-attributes");
+        var addAttr = page.select("table.data.additional-attributes");
         for (Element element : addAttr) {
             for (Element tr : element.select("tr")) {
-                var label = tr.selectFirst("th.col.label").text();
-                var data = tr.selectFirst("th.col.data").text();
+                var thLabel = tr.selectFirst("th");
+                var thData = tr.selectFirst("td");
 
-                specs.put(label, Arrays.stream(data.split(",")).toList());
+                if (thLabel != null && thData != null) {
+                    specs.put(thLabel.text(), Arrays.stream(thData.text().split(",")).toList());
+                }
             }
         }
 

@@ -2,6 +2,8 @@ server:
   port: ${SERVER_PORT:${PORT:8080}}
   forward-headers-strategy: framework
   address: 0.0.0.0
+  compression.enabled: true
+  compression.mime-types: application/json,application/x-ndjson
 
 logging:
   level:

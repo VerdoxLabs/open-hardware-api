@@ -25,12 +25,12 @@ public class Storage extends HardwareSpec<Storage> {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private HardwareTypes.StorageType storageType; // HDD/SSD
+    private HardwareTypes.StorageType storageType = HardwareTypes.StorageType.UNKNOWN; // HDD/SSD
 
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private HardwareTypes.StorageInterface storageInterface;
+    private HardwareTypes.StorageInterface storageInterface = HardwareTypes.StorageInterface.UNKNOWN;
 
 
     @PositiveOrZero
@@ -58,7 +58,6 @@ public class Storage extends HardwareSpec<Storage> {
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

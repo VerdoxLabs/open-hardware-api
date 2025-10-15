@@ -89,7 +89,6 @@ public class CPU extends HardwareSpec<CPU> {
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", socket=" + socket +
                 ", integratedGraphics='" + integratedGraphics + '\'' +
                 ", cores=" + cores +

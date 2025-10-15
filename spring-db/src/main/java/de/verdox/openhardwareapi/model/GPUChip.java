@@ -83,7 +83,6 @@ public class GPUChip extends HardwareSpec<GPUChip> {
                 ", manufacturer='" + manufacturer + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

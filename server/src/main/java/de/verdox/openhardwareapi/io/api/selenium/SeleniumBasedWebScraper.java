@@ -37,8 +37,9 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
      * Ein globaler (geteilter) Treiber – bei Bedarf kannst du das auf einen Pool umstellen.
      */
     @Setter
-    public static WebDriver webDriver;
+    private WebDriver webDriver;
 
+    private String id;
     private final ScrapingCache cache;
     private final CookieJar cookieJar;
 
@@ -53,19 +54,20 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     @Setter
     private BiPredicate<String, Document> shouldSavePage;
 
-    public SeleniumBasedWebScraper(ScrapingCache cache,
+    public SeleniumBasedWebScraper(String id, ScrapingCache cache,
                                    CookieJar cookieJar,
                                    BiPredicate<String, Document> isChallengePage,
                                    BiPredicate<String, Document> shouldSavePage) {
+        this.id = id;
         this.cache = Objects.requireNonNull(cache, "cache");
         this.cookieJar = Objects.requireNonNull(cookieJar, "cookieJar");
         this.isChallengePage = isChallengePage;
         this.shouldSavePage = shouldSavePage;
     }
 
-    public SeleniumBasedWebScraper(ScrapingCache cache,
+    public SeleniumBasedWebScraper(String id, ScrapingCache cache,
                                    CookieJar cookieJar) {
-        this(cache, cookieJar, (a, b) -> false, (a, b) -> true);
+        this(id, cache, cookieJar, (a, b) -> false, (a, b) -> true);
     }
 
 
@@ -88,14 +90,39 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
                 .flatMap(html -> isFreshEnough(key, ttl) ? Optional.of(html) : Optional.empty());
 
         if (cached.isPresent()) {
-            return Jsoup.parse(cached.get(), baseUri(domain));
+            Document cachedDocument = Jsoup.parse(cached.get(), baseUri(domain));
+
+            if (isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument)) {
+                ScrapingService.LOGGER.log(Level.INFO, "Removing cached challenge page: " + canonUrl);
+
+            }
+            else if (shouldSavePage == null || !shouldSavePage.test(canonUrl, cachedDocument)) {
+                ScrapingService.LOGGER.log(Level.INFO, "Removing page that should not be saved : " + canonUrl);
+            }
+            else {
+                return cachedDocument;
+            }
         }
 
         // 2) Live laden via Selenium
         ScrapingService.LOGGER.log(Level.FINER, "Cache miss → Selenium fetch: " + canonUrl + " [" + domain + ":" + id + "]");
         String html = fetchWithSelenium(canonUrl);
+        html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
 
         Document doc = Jsoup.parse(html, baseUri(domain));
+
+        if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
+            ScrapingService.LOGGER.log(Level.INFO, "Challenge page detected for URL: " + canonUrl);
+            try {
+                Thread.sleep(10000);
+                HtmlSlimmer.slimHtml(webDriver.getPageSource(), canonUrl, new HtmlSlimmer.Options());
+            } catch (InterruptedException e) {
+
+            }
+        }
+
+
+        doc = Jsoup.parse(html, baseUri(domain));
         if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
             ScrapingService.LOGGER.log(Level.INFO, "Challenge page detected for URL: " + canonUrl);
             throw new ChallengeFoundException();
@@ -153,7 +180,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         };
         options.addArguments(args);
 
-        webDriver = SeleniumUtil.create(
+        webDriver = SeleniumUtil.create(id,
                 options
         );
         if (log.isInfoEnabled()) {
@@ -172,16 +199,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     }
 
     public static void cleanup() {
-        if (webDriver != null) {
-            try {
-                log.info("Closing selenium web driver");
-                webDriver.quit();
-            } catch (Exception e) {
-                log.warn("Error while quitting WebDriver", e);
-            } finally {
-                webDriver = null;
-            }
-        }
+        SeleniumUtil.cleanUp();
     }
 
     /* ---------------------------------------------------------

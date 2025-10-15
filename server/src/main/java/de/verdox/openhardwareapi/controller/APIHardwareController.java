@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 @RestController
@@ -93,20 +94,19 @@ public class APIHardwareController {
     }
 
     @GetMapping("/byEan/{ean}/{type}")
-    public ResponseEntity<HardwareSpec> byEan(
+    public <HARDWARE extends HardwareSpec<HARDWARE>> ResponseEntity<HardwareSpec<?>> byEan(
             @PathVariable(required = true) String ean,
             @PathVariable(required = false) String type,
             WebRequest request
     ) {
         if (type == null) {
-            return ResponseEntity.of(hardwareSpecService.findLightByEanMPNUPCSN(null, ean, null, null));
+            return ResponseEntity.of(Optional.ofNullable(hardwareSpecService.findAnyByEAN(ean)));
         }
         if (!hardwareSpecService.isValidType(type)) {
             throw new IllegalArgumentException("Invalid type " + type);
         }
-
-        Class<? extends HardwareSpec> hardwareType = hardwareSpecService.getType(type);
-        return ResponseEntity.of(hardwareSpecService.findLightByEanMPNUPCSN(hardwareType, ean, null, null));
+        Class<HARDWARE> hardwareType = (Class<HARDWARE>) hardwareSpecService.getType(type);
+        return ResponseEntity.of(Optional.ofNullable(hardwareSpecService.findByEAN(hardwareType, ean)));
     }
 
 

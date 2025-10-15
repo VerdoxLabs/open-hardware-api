@@ -74,7 +74,6 @@ public class RAM extends HardwareSpec<RAM> {
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

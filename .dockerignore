@@ -7,4 +7,5 @@ frontend/generated
 .gitignore
 .DS_Store
 /open-hardware-api
-/open-hardware-api
+.github
+.gitattributes

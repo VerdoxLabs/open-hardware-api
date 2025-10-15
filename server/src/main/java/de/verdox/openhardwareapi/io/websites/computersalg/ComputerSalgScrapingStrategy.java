@@ -6,6 +6,8 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ComputerSalgScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
@@ -38,6 +40,10 @@ public class ComputerSalgScrapingStrategy implements WebsiteScrapingStrategy {
         }
     }
 
+    private static final Pattern PRODUCER_PATTERN = Pattern.compile("Produzent:\\s*([^|]+)");
+    private static final Pattern MODEL_PATTERN = Pattern.compile("Modell\\s*nummer:\\s*([^|]+)");
+    private static final Pattern EAN_PATTERN = Pattern.compile("EAN:\\s*([^|]+)");
+
     @Override
     public Map<String, List<String>> extractSpecMap(Document page) throws Throwable {
 
@@ -54,33 +60,29 @@ public class ComputerSalgScrapingStrategy implements WebsiteScrapingStrategy {
 
         Element details = page.selectFirst("span.v-product-details__product-number");
         if (details != null) {
-            // EAN
-            Element ean = details.selectFirst("span[itemprop=gtin13]");
-            if (ean != null) {
-                String eanText = ean.text().trim();
-                if (!eanText.isEmpty()) {
-                    specs.put("EAN", List.of(eanText));
-                }
-            }
 
-            // Hersteller (Produzent)
-            Element manufacturer = details.selectFirst(":matchesOwn(Produzent:) + span");
-            if (manufacturer != null) {
-                String manufacturerText = manufacturer.text().trim();
-                if (!manufacturerText.isEmpty()) {
-                    specs.put("manufacturer", List.of(manufacturerText));
-                }
-            }
+            String producer = extract(details.text(), PRODUCER_PATTERN);
+            String mpn = extract(details.text(), MODEL_PATTERN);
+            String ean = extract(details.text(), EAN_PATTERN);
 
-            // Modellnummer (MPN)
-            Element mpn = details.selectFirst(":matchesOwn(Modell( |-)nummer:) + span.value");
-            if (mpn != null) {
-                String mpnText = mpn.text().trim();
-                if (!mpnText.isEmpty()) {
-                    specs.put("MPN", List.of(mpnText));
-                }
+            if(!producer.isBlank()) {
+                specs.put("manufacturer", List.of(producer));
+            }
+            if(!mpn.isBlank()) {
+                specs.put("MPN", List.of(mpn));
+            }
+            if(!ean.isBlank()) {
+                specs.put("EAN", List.of(ean));
             }
         }
         return specs;
+    }
+
+    private static String extract(String text, Pattern pattern) {
+        Matcher m = pattern.matcher(text);
+        if (m.find()) {
+            return m.group(1).trim();
+        }
+        return "";
     }
 }

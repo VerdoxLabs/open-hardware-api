@@ -3,11 +3,11 @@ package de.verdox.openhardwareapi.component.service;
 
 import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
 import de.verdox.openhardwareapi.io.gpu.DPGPUScraper;
-import de.verdox.openhardwareapi.io.pc_combo_scraper.*;
 import de.verdox.openhardwareapi.io.websites.alternate.AlternateScrapers;
 import de.verdox.openhardwareapi.io.websites.caseking.CaseKingScrapers;
 import de.verdox.openhardwareapi.io.websites.computersalg.ComputerSalgScrapers;
 import de.verdox.openhardwareapi.io.websites.mindfactory.MindfactoryScrapers;
+import de.verdox.openhardwareapi.io.websites.pc_kombo.PCKomboScrapers;
 import de.verdox.openhardwareapi.io.websites.xkom.XKomScrapers;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import jakarta.annotation.PostConstruct;
@@ -63,105 +63,54 @@ public class ScrapingService {
 
     private final HardwareSpecService hardwareSpecService;
     private final SynchronizationService synchronizationService;
+    private final RemoteSoldItemService remoteSoldItemService;
     private CompletableFuture<Void> currentlyRunning;
-    private final List<ComponentWebScraper.ScrapeListener<HardwareSpec>> scrapeListeners = new ArrayList<>();
-    private final List<ComponentWebScraper<? extends HardwareSpec>> scrapers;
+    private final List<ComponentWebScraper.ScrapeListener<HardwareSpec<?>>> scrapeListeners = new ArrayList<>();
+    private final List<ComponentWebScraper<? extends HardwareSpec<?>>> scrapers;
     private final int amountTasksTotal;
 
     private static final int MAX_RETRIES = 3; // z.B. 3 Versuche (1 initial + 2 Retries)
     private final TaskScheduler taskScheduler;
 
-    public ScrapingService(HardwareSpecService hardwareSpecService, SynchronizationService synchronizationService, TaskScheduler taskScheduler) {
+    public ScrapingService(HardwareSpecService hardwareSpecService, SynchronizationService synchronizationService, RemoteSoldItemService remoteSoldItemService, TaskScheduler taskScheduler) {
         this.hardwareSpecService = hardwareSpecService;
         this.synchronizationService = synchronizationService;
+        this.remoteSoldItemService = remoteSoldItemService;
         addListener(hardwareSpecService);
 
         this.scrapers = setupScrapers();
+        LOGGER.info("Registered "+scrapers.size()+" scrapers");
         this.amountTasksTotal = scrapers.stream().mapToInt(ComponentWebScraper::getAmountTasks).sum();
 
 
         this.taskScheduler = taskScheduler;
     }
 
-    private List<ComponentWebScraper<? extends HardwareSpec>> setupScrapers() {
-        return List.of(
-                ComputerSalgScrapers.forCPU(hardwareSpecService),
-                ComputerSalgScrapers.forMotherboard(hardwareSpecService),
-                ComputerSalgScrapers.forPSU(hardwareSpecService),
-                ComputerSalgScrapers.forCase(hardwareSpecService),
-                ComputerSalgScrapers.forGPU(hardwareSpecService),
-                ComputerSalgScrapers.forRAMDDR5(hardwareSpecService),
-                ComputerSalgScrapers.forRAMDDR4(hardwareSpecService),
-                ComputerSalgScrapers.forRAMDDR3(hardwareSpecService),
-                ComputerSalgScrapers.forRAMDDR2(hardwareSpecService),
-                ComputerSalgScrapers.forRAMDDR(hardwareSpecService),
-                ComputerSalgScrapers.forSSD(hardwareSpecService),
-                ComputerSalgScrapers.forHDD(hardwareSpecService),
+    private List<ComponentWebScraper<? extends HardwareSpec<?>>> setupScrapers() {
+        List<ComponentWebScraper<? extends HardwareSpec<?>>> scrapers = new ArrayList<>();
 
-                XKomScrapers.forMotherboard(hardwareSpecService),
-                XKomScrapers.forCPU(hardwareSpecService),
-                XKomScrapers.forGPU(hardwareSpecService),
-                XKomScrapers.forCase(hardwareSpecService),
-                XKomScrapers.forHDD(hardwareSpecService),
-                XKomScrapers.forSSD(hardwareSpecService),
-                XKomScrapers.forPSU(hardwareSpecService),
-                XKomScrapers.forCPUCooler(hardwareSpecService),
-
-                MindfactoryScrapers.forMotherboard(hardwareSpecService),
-                MindfactoryScrapers.forCPU(hardwareSpecService),
-                MindfactoryScrapers.forGPU(hardwareSpecService),
-                MindfactoryScrapers.forCase(hardwareSpecService),
-                MindfactoryScrapers.forHDD(hardwareSpecService),
-                MindfactoryScrapers.forSSD(hardwareSpecService),
-                MindfactoryScrapers.forPSU(hardwareSpecService),
-                MindfactoryScrapers.forCPUCooler(hardwareSpecService),
-                MindfactoryScrapers.forCPULiquidCooler(hardwareSpecService),
-
-                AlternateScrapers.forCPU(hardwareSpecService),
-                AlternateScrapers.forGPU(hardwareSpecService),
-                AlternateScrapers.forRAM(hardwareSpecService),
-                AlternateScrapers.forCase(hardwareSpecService),
-                AlternateScrapers.forHDD(hardwareSpecService),
-                AlternateScrapers.forCPUCooler(hardwareSpecService),
-                AlternateScrapers.forCPULiquidCooler(hardwareSpecService),
-                AlternateScrapers.forSataSSD(hardwareSpecService),
-                AlternateScrapers.forM2SSD(hardwareSpecService),
-                AlternateScrapers.forPSU(hardwareSpecService),
-                AlternateScrapers.forMotherboard(hardwareSpecService),
-
-                CaseKingScrapers.forCPU(hardwareSpecService),
-                CaseKingScrapers.forGPU(hardwareSpecService),
-                CaseKingScrapers.forRAM(hardwareSpecService),
-                CaseKingScrapers.forCase(hardwareSpecService),
-                CaseKingScrapers.forHDD(hardwareSpecService),
-                CaseKingScrapers.forSSD(hardwareSpecService),
-                CaseKingScrapers.forPSU(hardwareSpecService),
-                CaseKingScrapers.forMotherboard(hardwareSpecService),
+        scrapers.addAll(XKomScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(MindfactoryScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(ComputerSalgScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(CaseKingScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(AlternateScrapers.create(hardwareSpecService).buildScrapers());
 
 
-                new DPGPUScraper(hardwareSpecService),
-                new CPUKomboScraper(hardwareSpecService),
-                new GPUKomboScraper(hardwareSpecService),
-                new RAMKomboScraper(hardwareSpecService),
-                new CPUCoolerKomboScraper(hardwareSpecService),
-                new CaseKomboScraper(hardwareSpecService),
-                new PSUKomboScraper(hardwareSpecService),
-                new MotherboardKomboScraper(hardwareSpecService),
-                new HDDKomboScraper(hardwareSpecService),
-                new SSDKomboScraper(hardwareSpecService),
-                new DisplayKomboScraper(hardwareSpecService)
-        );
+        scrapers.add(new DPGPUScraper(hardwareSpecService));
+
+        return scrapers;
     }
 
     public int getAmountTasks() {
         return amountTasksTotal;
     }
 
-    public void addListener(ComponentWebScraper.ScrapeListener<HardwareSpec> listener) {
+    public void addListener(ComponentWebScraper.ScrapeListener<HardwareSpec<?>> listener) {
         scrapeListeners.add(listener);
     }
 
-    public void removeListener(ComponentWebScraper.ScrapeListener<HardwareSpec> listener) {
+    public void removeListener(ComponentWebScraper.ScrapeListener<HardwareSpec<?>> listener) {
         scrapeListeners.add(listener);
     }
 
@@ -209,7 +158,7 @@ public class ScrapingService {
     private void doScrape() {
         for (ComponentWebScraper<? extends HardwareSpec> scraper : scrapers) {
             try {
-                scraper.downloadWebsites()
+                long count = scraper.downloadWebsites()
                         .map(document -> {
                             try {
                                 return scraper.extract(document);
@@ -218,24 +167,27 @@ public class ScrapingService {
                                 return null;
                             }
                         }).filter(Objects::nonNull)
-                        .forEach(stringListMap -> {
+                        .peek(stringListMap -> {
                             try {
                                 scraper.parse(stringListMap, this::callScrapeEvent);
                             } catch (Throwable e) {
                                 ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while translating specs data to a target", e);
                             }
-                        });
+                        }).count();
+                ScrapingService.LOGGER.log(Level.INFO, "Scraper scraped " + count + " products");
             } catch (Throwable e) {
                 ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while downloading specs pages", e);
             }
         }
     }
 
-    private void callScrapeEvent(HardwareSpec hardwareSpec) {
-        for (ComponentWebScraper.ScrapeListener<HardwareSpec> scrapeListener : scrapeListeners) {
+    private <HARDWARE extends HardwareSpec<HARDWARE>> void callScrapeEvent(HARDWARE hardwareSpec) {
+        for (ComponentWebScraper.ScrapeListener<HardwareSpec<?>> scrapeListener : scrapeListeners) {
             try {
                 scrapeListener.onScrape(hardwareSpec);
                 synchronizationService.addToSyncQueue(hardwareSpec);
+
+                remoteSoldItemService.queueForPriceFetch(hardwareSpec.getEAN());
             } catch (Throwable ex) {
                 LOGGER.log(Level.SEVERE, "Scraping listener " + scrapeListener.getClass().getSimpleName() + " produced an exception", ex);
             }

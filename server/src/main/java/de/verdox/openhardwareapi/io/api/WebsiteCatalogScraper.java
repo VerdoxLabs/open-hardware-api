@@ -16,18 +16,20 @@ import java.util.logging.Level;
 import java.util.stream.Stream;
 
 public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWARE>> implements ComponentWebScraper<HARDWARE> {
+    private final String domain;
     protected final String id;
     private final List<String> urlsToScrape;
+    @Getter
     protected final SeleniumBasedWebScraper seleniumBasedWebScraper;
-    private final Map<String, ScrapedHardwareMapper<?>> mappers = new HashMap<>();
     @Getter
     @Setter
     private WebsiteScrapingStrategy websiteScrapingStrategy;
 
-    public WebsiteCatalogScraper(String id, String... urlsToScrape) {
+    public WebsiteCatalogScraper(String domain, String id, String... urlsToScrape) {
+        this.domain = domain;
         this.id = id;
         this.urlsToScrape = Arrays.stream(urlsToScrape).toList();
-        this.seleniumBasedWebScraper = new SeleniumBasedWebScraper(new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
+        this.seleniumBasedWebScraper = new SeleniumBasedWebScraper("shop-scraper", new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
     }
 
     @Override
@@ -37,7 +39,7 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
         Queue<String> multiPages = new ArrayDeque<>(urlsToScrape);
 
         if (multiPages.isEmpty()) {
-            ScrapingService.LOGGER.log(Level.WARNING, "No scraping url defined for " + getClass().getSimpleName());
+            ScrapingService.LOGGER.log(Level.SEVERE, "No scraping url defined for " + domain + "[" + id + "]");
             return Stream.of();
         }
 
@@ -48,9 +50,8 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
             }
             alreadyCollected.add(nextUrl);
 
-
             try {
-                Document doc = seleniumBasedWebScraper.fetch(ComponentWebScraper.topLevelHost(nextUrl), id, nextUrl, Duration.ofDays(30));
+                Document doc = seleniumBasedWebScraper.fetch(domain, id, nextUrl, Duration.ofDays(30));
                 websiteScrapingStrategy.extractMultiPageURLs(nextUrl, doc, multiPages);
                 websiteScrapingStrategy.extractSinglePagesURLs(nextUrl, doc, singlePages);
 
@@ -59,12 +60,16 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
             }
         }
 
+        String topLevelHost = ComponentWebScraper.topLevelHost(urlsToScrape.getFirst());
+
+        ScrapingService.LOGGER.log(Level.INFO, "Found " + singlePages.size() + " scraping pages for " + topLevelHost + " [" + id + "]");
+
         return singlePages
                 .stream()
                 .filter(url -> !alreadyCollected.contains(url))
                 .map(url -> {
                     try {
-                        return new ScrapedSpecPage(url, seleniumBasedWebScraper.fetch(ComponentWebScraper.topLevelHost(url), id, url, Duration.ofDays(90)));
+                        return new ScrapedSpecPage(url, seleniumBasedWebScraper.fetch(domain, id, url, Duration.ofDays(90)));
                     } catch (Throwable ex) {
                         ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape single page " + url, ex);
                         return null;

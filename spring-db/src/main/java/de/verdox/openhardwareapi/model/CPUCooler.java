@@ -28,7 +28,7 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
     }
 
     @Enumerated(EnumType.STRING)
-    private HardwareTypes.CoolerType type; // Luft oder AIO
+    private HardwareTypes.CoolerType type = HardwareTypes.CoolerType.UNKNOWN; // Luft oder AIO
 
 
     @ElementCollection(fetch = FetchType.EAGER)
@@ -48,7 +48,6 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
     @Override
     public String toString() {
         return "CPUCooler{" +
-                "UPC='" + UPC + '\'' +
                 ", type=" + type +
                 ", supportedSockets=" + supportedSockets +
                 ", radiatorLengthMm=" + radiatorLengthMm +

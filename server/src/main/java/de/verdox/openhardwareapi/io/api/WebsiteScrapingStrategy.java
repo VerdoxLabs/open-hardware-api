@@ -34,9 +34,6 @@ public interface WebsiteScrapingStrategy {
         if (specs.containsKey("EAN") && !specs.get("EAN").isEmpty()) {
             target.setEAN(specs.get("EAN").getFirst());
         }
-        if (specs.containsKey("UPC") && !specs.get("UPC").isEmpty()) {
-            target.setUPC(specs.get("UPC").getFirst());
-        }
         if (specs.containsKey("MPN") && !specs.get("MPN").isEmpty()) {
             target.setMPN(specs.get("MPN").getFirst());
         }

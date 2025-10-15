@@ -103,7 +103,6 @@ public class Motherboard extends HardwareSpec<Motherboard> {
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

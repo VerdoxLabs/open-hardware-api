@@ -106,7 +106,6 @@ public class Display extends HardwareSpec<Display> {
                 ", model='" + model + '\'' +
                 ", EAN='" + EAN + '\'' +
                 ", MPN='" + MPN + '\'' +
-                ", UPC='" + UPC + '\'' +
                 '}';
     }
 }
