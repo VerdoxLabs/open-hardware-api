@@ -9,16 +9,22 @@ import java.util.*;
 
 public class PCKomboStrategy implements WebsiteScrapingStrategy {
     @Override
-    public void extractMultiPageURLs(String currentURL, Document page, Queue<String> multiPageURLs) {
-
+    public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
+        //TODO
     }
 
     @Override
-    public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+    public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
         for (Element columns : page.select("li.columns")) {
             var a = columns.selectFirst("a");
             if (a != null) {
-                singlePageURLs.add(a.attr("href"));
+                SinglePageCandidate singlePageCandidate = new SinglePageCandidate(a.attr("href"));
+
+                var span = columns.selectFirst("span.series");
+                if (span != null) {
+                    singlePageCandidate.specMap().put("gpu-chip", List.of(span.text()));
+                }
+                singlePageURLs.add(singlePageCandidate);
             }
         }
     }
@@ -28,7 +34,7 @@ public class PCKomboStrategy implements WebsiteScrapingStrategy {
         Map<String, List<String>> specs = new HashMap<>();
 
         var firstH1 = page.selectFirst("h1");
-        if(firstH1 != null) {
+        if (firstH1 != null) {
             specs.put("model", List.of(firstH1.text()));
         }
 
@@ -76,7 +82,7 @@ public class PCKomboStrategy implements WebsiteScrapingStrategy {
             }
         }
 
-        if(specs.containsKey("Producer")) {
+        if (specs.containsKey("Producer")) {
             specs.put("manufacturer", specs.get("Producer"));
         }
         return specs;

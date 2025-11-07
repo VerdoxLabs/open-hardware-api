@@ -127,6 +127,23 @@ public class HardwareTypes {
     }
 
     @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @Getter
+    public enum PSUFormFactor {
+        UNKNOWN("Unknown"),
+        ATX("ATX"),
+        SFX("SFX"),
+        SFX_L("SFX-L"),
+        TFX("TFX"),
+        FLEX_ATX("Flex ATX"),
+        ;
+        private final String name;
+
+        PSUFormFactor(String name) {
+            this.name = name;
+        }
+    }
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PSU_MODULARITY {UNKNOWN, NON_MODULAR, SEMI_MODULAR, FULL_MODULAR}
 
     @JsonFormat(shape = JsonFormat.Shape.STRING)

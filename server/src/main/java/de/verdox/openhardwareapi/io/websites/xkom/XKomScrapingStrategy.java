@@ -8,21 +8,21 @@ import java.util.*;
 
 public class XKomScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
-    public void extractMultiPageURLs(String currentURL, Document page, Queue<String> multiPageURLs) {
+    public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
         for (Element pagesItemNext : page.select("li.pages-item-next")) {
             var a = pagesItemNext.selectFirst("a");
             if (a != null) {
-                multiPageURLs.add(a.attr("href"));
+                multiPageURLs.add(new MultiPageCandidate(a.attr("href")));
             }
         }
     }
 
     @Override
-    public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+    public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
         for (Element productItem : page.select("li.product.product-item")) {
             var a = productItem.selectFirst("a.product-item-photo");
             if (a != null) {
-                singlePageURLs.add(a.attr("href"));
+                singlePageURLs.add(new SinglePageCandidate(a.attr("href")));
             }
         }
     }
@@ -34,6 +34,11 @@ public class XKomScrapingStrategy implements WebsiteScrapingStrategy {
         var header = page.selectFirst("div.page-title-wrapper.product");
         if (header != null) {
             specs.put("model", List.of(header.selectFirst("span.base").text()));
+        }
+
+        var MPNDiv = page.selectFirst("div.product.attribute.han");
+        if (MPNDiv != null) {
+            specs.put("MPN", List.of(MPNDiv.text().replace("PN: ", "")));
         }
 
         var addAttr = page.select("table.data.additional-attributes");

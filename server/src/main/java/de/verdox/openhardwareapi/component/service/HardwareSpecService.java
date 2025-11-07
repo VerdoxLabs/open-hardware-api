@@ -6,17 +6,23 @@ import de.verdox.openhardwareapi.model.*;
 import de.verdox.openhardwareapi.util.GpuRegexParser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Example;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 @Service
 public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<HardwareSpec<?>> {
 
+    private final Logger LOGGER = Logger.getLogger(HardwareSpecService.class.getName());
     private final HardwareSpecRepository baseRepo;
     private final GPUChipRepository gpuChipRepository;
     private static final Set<String> normalizedManufacturers = new HashSet<>();
@@ -53,6 +59,27 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
     public String getTypeAsString(Class<? extends HardwareSpec<?>> type) {
         return HardwareTypeUtil.getSupportedSpecTypes().stream().filter(aClass -> aClass.equals(type)).map(aClass -> aClass.getSimpleName().toLowerCase()).findFirst().orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public <HARDWARE extends HardwareSpec<HARDWARE>> Page<HARDWARE> findPage(
+            Class<HARDWARE> clazz,
+            Pageable pageable
+    ) {
+
+        HardwareSpecificRepo<HARDWARE> repo = getRepo(clazz);
+
+
+        // Schritt 1: IDs holen
+        Page<Long> idPage = repo.findPageIds(pageable);
+        if (idPage.isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, 0);
+        }
+
+        List<HARDWARE> items = repo.findAllByIdInOrderByIdAsc(idPage.getContent());
+
+        // Schritt 3: Page zusammenbauen
+        return new PageImpl<>(items, pageable, idPage.getTotalElements());
     }
 
     public <HARDWARE extends HardwareSpec<HARDWARE>> HardwareSpecificRepo<HARDWARE> getRepo(Class<HARDWARE> type) {
@@ -131,17 +158,17 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
     @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByEAN(Class<HARDWARE> clazz, String EAN) {
-        return (HARDWARE) baseRepo.findByEANIgnoreCase(EAN).orElse(null);
+        return getRepo(clazz).findByEan(EAN).orElse(null);
     }
 
     @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByEAN(String EAN) {
-        return (HARDWARE) baseRepo.findByEANIgnoreCase(EAN).orElse(null);
+        return (HARDWARE) baseRepo.findByEan(EAN).orElse(null);
     }
 
     @Transactional(readOnly = true)
     public HardwareSpec<?> findAnyByEAN(String EAN) {
-        return baseRepo.findByEANIgnoreCase(EAN).orElse(null);
+        return baseRepo.findByEan(EAN).orElse(null);
     }
 
     /**
@@ -166,10 +193,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             throw new IllegalArgumentException("hardwareSpec darf nicht null sein");
         }
 
-        if (hardwareSpec.getEAN() == null) {
-            return false;
-        }
-
         // Model normalisieren (Trim + Mehrfachspaces zu einem Space)
         String normalizedModel = normalizeModel(hardwareSpec.getModel());
         if (normalizedModel == null || normalizedModel.isBlank()) {
@@ -180,6 +203,11 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
         if (hardwareSpec.getManufacturer() == null || hardwareSpec.getManufacturer().isBlank()) {
             hardwareSpec.setManufacturer(getAllKnownManufacturers().stream().filter(s -> normalizedModel.toLowerCase().contains(s)).findAny().orElse(null));
+        }
+
+        if(hardwareSpec.getMPN() == null || hardwareSpec.getMPN().isBlank()) {
+            return false;
+/*            throw new IllegalArgumentException("Hardware mpn cannot be null for " + hardwareSpec.getModel());*/
         }
 
         if (hardwareSpec.getManufacturer() == null || hardwareSpec.getManufacturer().isBlank()) {
@@ -202,7 +230,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         normalizedManufacturers.add(incoming.getManufacturer());
 
         Set<HardwareSpec<?>> matches = new LinkedHashSet<>();
-        if (hasText(incoming.getEAN())) baseRepo.findByEANIgnoreCase(incoming.getEAN()).ifPresent(matches::add);
         if (hasText(incoming.getMPN())) baseRepo.findByMPNIgnoreCase(incoming.getMPN()).ifPresent(matches::add);
 
         if (matches.isEmpty()) {
@@ -255,7 +282,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     @Transactional
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE merge(HARDWARE entity) {
         // Normalisierte Kennungen aus dem eingehenden Entity
-        final String ean = HardwareSpecificRepo.normalizeEAN_MPN(entity.getEAN());
         final String mpn = HardwareSpecificRepo.normalizeEAN_MPN(entity.getMPN());
 
         HardwareSpecificRepo<HARDWARE> repo = getRepo(entity.getClass());
@@ -264,16 +290,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
 
         HARDWARE byEan = null, byUpc = null, byMpn = null;
-
-        if (notBlank(ean)) byEan = repo.findByEANIgnoreCase(ean).orElse(null);
         if (notBlank(mpn)) byMpn = repo.findByMPNIgnoreCase(mpn).orElse(null);
 
         // Prüfe, ob mehrere unterschiedliche Treffer existieren
         HARDWARE found = firstNonNull(byEan, byUpc, byMpn);
         if (found != null) {
-            if ((byEan != null && (byEan.getId() != found.getId()))
-                    || (byUpc != null && (byUpc.getId() != found.getId()))
-                    || (byMpn != null && (byMpn.getId() != found.getId()))) {
+            if (byMpn != null && (byMpn.getId() != found.getId())) {
                 throw new IllegalStateException("Conflict in mergeAll: EAN/UPC/MPN are referencing distinct data entries.");
             }
             // Domain-spezifisches Merge am Aggregat
@@ -282,7 +304,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             return found;
         } else {
             // Vor dem Speichern die normalisierten Kennungen setzen (empfohlen)
-            entity.setEAN(ean);
             entity.setMPN(mpn);
             saveHardware(entity);
             return entity;
@@ -302,30 +323,25 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         // 1) Alle normalisierten Kennungen einsammeln
         Set<String> eans = new HashSet<>(), mpns = new HashSet<>();
         for (HARDWARE e : input) {
-            String ean = HardwareSpecificRepo.normalizeEAN_MPN(e.getEAN());
             String mpn = HardwareSpecificRepo.normalizeEAN_MPN(e.getMPN());
-            if (notBlank(ean)) eans.add(ean);
             if (notBlank(mpn)) mpns.add(mpn);
         }
 
         // 2) Bulk-Fetch aller existierenden Datensätze
-        Map<String, HARDWARE> byEanMap = repo.findAllByEANInNormalized(eans); // Map<EAN, HW>
+        Map<String, HARDWARE> byEanMap = repo.findAllByEanIn(eans); // Map<EAN, HW>
         Map<String, HARDWARE> byMpnMap = repo.findAllByMPNInNormalized(mpns);
 
         // 3) Mergen
         List<HARDWARE> toSave = new ArrayList<>();
         for (HARDWARE e : input) {
-            String ean = HardwareSpecificRepo.normalizeEAN_MPN(e.getEAN());
             String mpn = HardwareSpecificRepo.normalizeEAN_MPN(e.getMPN());
 
-            HARDWARE a = notBlank(ean) ? byEanMap.get(ean) : null;
             HARDWARE c = notBlank(mpn) ? byMpnMap.get(mpn) : null;
 
-            HARDWARE found = firstNonNull(a, c);
+            HARDWARE found = firstNonNull(c);
             if (found != null) {
                 // Konflikt prüfen
-                if ((a != null && !(a.getId() == found.getId()))
-                        || (c != null && !(c.getId() == found.getId()))) {
+                if (c != null && !(c.getId() == found.getId())) {
                     throw new IllegalStateException("Conflict in mergeAll: EAN/UPC/MPN are referencing distinct data entries.");
                 }
                 found.merge(e);
@@ -333,7 +349,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                     toSave.add(found);
                 }
             } else {
-                e.setEAN(ean);
                 e.setMPN(mpn);
                 if (sanitizeBeforeSave(e)) {
                     toSave.add(e);

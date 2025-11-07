@@ -1,4 +1,4 @@
-package de.verdox.openhardwareapi.controller;
+package de.verdox.openhardwareapi.controller.hardware;
 
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,12 +28,10 @@ import java.util.logging.Level;
 @RequestMapping("/api/v1/specs")
 public class APISpecUploadController {
     private final ObjectMapper om;
-    /*    private final javax.validation.Validator validator;*/
     private final HardwareSpecService hardwareSpecService;
 
-    public APISpecUploadController(ObjectMapper om, /*javax.validation.Validator validator, */HardwareSpecService hardwareSpecService) {
+    public APISpecUploadController(ObjectMapper om, HardwareSpecService hardwareSpecService) {
         this.om = om;
-        /*this.validator = validator;*/
         this.hardwareSpecService = hardwareSpecService;
     }
 
@@ -48,7 +46,6 @@ public class APISpecUploadController {
         HardwareSpecificRepo<HARDWARE> repo = hardwareSpecService.getRepo(hardwareType);
 
         HARDWARE entity = readStrict(json, hardwareType);
-        validateOrThrow(entity);
 
         ScrapingService.LOGGER.log(Level.FINE, "Received merge for " + entity);
         var saved = hardwareSpecService.merge(entity);
@@ -74,7 +71,6 @@ public class APISpecUploadController {
         List<BulkError> errors = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             try {
-                validateOrThrow(items.get(i));
                 toSave.add(items.get(i));
             } catch (BadRequestException ex) {
                 if (allOrNothing) throw ex; // brich komplett ab
@@ -143,16 +139,6 @@ public class APISpecUploadController {
             throw bad("Empty bulk payload (expected JSON array or NDJSON lines).");
         }
         return result;
-    }
-
-    private void validateOrThrow(Object entity) {
-/*        Set<ConstraintViolation<Object>> violations = validator.validate(entity);
-        if (!violations.isEmpty()) {
-            String msg = violations.stream()
-                    .map(v -> v.getPropertyPath() + " " + v.getMessage())
-                    .collect(Collectors.joining("; "));
-            throw bad("Validation failed: " + msg);
-        }*/
     }
 
     private static BadRequestException bad(String msg) {

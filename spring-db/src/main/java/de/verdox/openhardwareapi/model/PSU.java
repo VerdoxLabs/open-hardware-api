@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.values.PowerConnector;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -17,6 +18,10 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "PSU.All",
+        includeAllAttributes = true
+)
 public class PSU extends HardwareSpec<PSU> {
 
     @Override
@@ -25,7 +30,7 @@ public class PSU extends HardwareSpec<PSU> {
         mergeNumber(other, PSU::getWattage, PSU::setWattage);
         mergeEnum(other, PSU::getEfficiencyRating, PSU::setEfficiencyRating, HardwareTypes.PsuEfficiencyRating.UNKNOWN);
         mergeEnum(other, PSU::getModularity, PSU::setModularity, HardwareTypes.PSU_MODULARITY.UNKNOWN);
-        mergeEnum(other, PSU::getSize, PSU::setSize, HardwareTypes.MotherboardFormFactor.UNKNOWN);
+        mergeEnum(other, PSU::getSize, PSU::setSize, HardwareTypes.PSUFormFactor.UNKNOWN);
         mergeSet(other, PSU::getConnectors);
     }
 
@@ -35,17 +40,21 @@ public class PSU extends HardwareSpec<PSU> {
 
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PsuEfficiencyRating efficiencyRating = HardwareTypes.PsuEfficiencyRating.NONE;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PSU_MODULARITY modularity = HardwareTypes.PSU_MODULARITY.UNKNOWN;
 
     @Enumerated(EnumType.STRING)
-    private HardwareTypes.MotherboardFormFactor size = HardwareTypes.MotherboardFormFactor.UNKNOWN;
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.PSUFormFactor size = HardwareTypes.PSUFormFactor.UNKNOWN;
 
+    private Float psuPowerVersion = 3.0F;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "psu_connectors", joinColumns = @JoinColumn(name = "spec_id"))
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "psu_connectors", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "TYPE"}))
     private Set<PowerConnector> connectors = new LinkedHashSet<>();
 
     @Override
@@ -63,7 +72,7 @@ public class PSU extends HardwareSpec<PSU> {
                 ", size=" + size +
                 ", connectors=" + connectors +
                 ", manufacturer='" + manufacturer + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';

@@ -1,21 +1,27 @@
 package de.verdox.openhardwareapi.component.service;
 
 
+import com.google.gson.GsonBuilder;
+import de.verdox.openhardwareapi.configuration.DataStorage;
 import de.verdox.openhardwareapi.io.api.ComponentWebScraper;
 import de.verdox.openhardwareapi.io.gpu.DPGPUScraper;
 import de.verdox.openhardwareapi.io.websites.alternate.AlternateScrapers;
 import de.verdox.openhardwareapi.io.websites.caseking.CaseKingScrapers;
 import de.verdox.openhardwareapi.io.websites.computersalg.ComputerSalgScrapers;
 import de.verdox.openhardwareapi.io.websites.mindfactory.MindfactoryScrapers;
+import de.verdox.openhardwareapi.io.websites.pc_builder_io.PCBuilderIOScrapers;
 import de.verdox.openhardwareapi.io.websites.pc_kombo.PCKomboScrapers;
 import de.verdox.openhardwareapi.io.websites.xkom.XKomScrapers;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import jakarta.annotation.PostConstruct;
+import org.apache.commons.io.FileUtils;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -62,8 +68,9 @@ public class ScrapingService {
     }
 
     private final HardwareSpecService hardwareSpecService;
-    private final SynchronizationService synchronizationService;
+    private final HardwareSyncService hardwareSyncService;
     private final RemoteSoldItemService remoteSoldItemService;
+    private final EbayAPIService ebayAPIService;
     private CompletableFuture<Void> currentlyRunning;
     private final List<ComponentWebScraper.ScrapeListener<HardwareSpec<?>>> scrapeListeners = new ArrayList<>();
     private final List<ComponentWebScraper<? extends HardwareSpec<?>>> scrapers;
@@ -72,14 +79,15 @@ public class ScrapingService {
     private static final int MAX_RETRIES = 3; // z.B. 3 Versuche (1 initial + 2 Retries)
     private final TaskScheduler taskScheduler;
 
-    public ScrapingService(HardwareSpecService hardwareSpecService, SynchronizationService synchronizationService, RemoteSoldItemService remoteSoldItemService, TaskScheduler taskScheduler) {
+    public ScrapingService(HardwareSpecService hardwareSpecService, HardwareSyncService hardwareSyncService, RemoteSoldItemService remoteSoldItemService, EbayAPIService ebayAPIService, TaskScheduler taskScheduler) {
         this.hardwareSpecService = hardwareSpecService;
-        this.synchronizationService = synchronizationService;
+        this.hardwareSyncService = hardwareSyncService;
         this.remoteSoldItemService = remoteSoldItemService;
+        this.ebayAPIService = ebayAPIService;
         addListener(hardwareSpecService);
 
         this.scrapers = setupScrapers();
-        LOGGER.info("Registered "+scrapers.size()+" scrapers");
+        LOGGER.info("Registered " + scrapers.size() + " scrapers");
         this.amountTasksTotal = scrapers.stream().mapToInt(ComponentWebScraper::getAmountTasks).sum();
 
 
@@ -89,18 +97,13 @@ public class ScrapingService {
     private List<ComponentWebScraper<? extends HardwareSpec<?>>> setupScrapers() {
         List<ComponentWebScraper<? extends HardwareSpec<?>>> scrapers = new ArrayList<>();
 
-        scrapers.addAll(CaseKingScrapers.create(hardwareSpecService).buildScrapers());
-        scrapers.addAll(AlternateScrapers.create(hardwareSpecService).buildScrapers());
-        scrapers.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(PCBuilderIOScrapers.create(hardwareSpecService).buildScrapers());
         scrapers.addAll(XKomScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
         scrapers.addAll(ComputerSalgScrapers.create(hardwareSpecService).buildScrapers());
         scrapers.addAll(MindfactoryScrapers.create(hardwareSpecService).buildScrapers());
-
-
-
-
-        scrapers.add(new DPGPUScraper(hardwareSpecService));
-
+        scrapers.addAll(CaseKingScrapers.create(hardwareSpecService).buildScrapers());
+        scrapers.addAll(AlternateScrapers.create(hardwareSpecService).buildScrapers());
         return scrapers;
     }
 
@@ -158,20 +161,37 @@ public class ScrapingService {
     }
 
     private void doScrape() {
+
+        try {
+            new DPGPUScraper().scrape(this::callScrapeEvent);
+        } catch (Throwable ex) {
+            ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while extracting gpu chip data", ex);
+        }
+
         for (ComponentWebScraper<? extends HardwareSpec> scraper : scrapers) {
+            ScrapingService.LOGGER.log(Level.INFO, "Starting scraper " + scraper.baseURL() + "[" + scraper.id() + "]");
             try {
                 long count = scraper.downloadWebsites()
                         .map(document -> {
                             try {
                                 return scraper.extract(document);
                             } catch (Throwable e) {
-                                ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while extracting data from the document", e);
+                                ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while extracting data from [" + document.singlePageCandidate().url() + "]", e);
                                 return null;
                             }
                         }).filter(Objects::nonNull)
                         .peek(stringListMap -> {
                             try {
-                                scraper.parse(stringListMap, this::callScrapeEvent);
+                                var result = scraper.parse(stringListMap, this::callScrapeEvent);
+                                if (result.isPresent() && !stringListMap.specs().isEmpty()) {
+                                    String json = new GsonBuilder().setPrettyPrinting().create().toJson(stringListMap);
+                                    String model = result.get().getModel().trim();
+
+                                    String safeModel = model.replaceAll("[\\\\/:*?\"<>|]", "_");
+
+                                    Path path = DataStorage.resolve("scraping/specs/" + scraper.baseURL() + "/" + scraper.id() + "/" + safeModel + ".json");
+                                    FileUtils.writeStringToFile(path.toFile(), json, StandardCharsets.UTF_8);
+                                }
                             } catch (Throwable e) {
                                 ScrapingService.LOGGER.log(Level.SEVERE, "Scraper produced an exception while translating specs data to a target", e);
                             }
@@ -187,9 +207,11 @@ public class ScrapingService {
         for (ComponentWebScraper.ScrapeListener<HardwareSpec<?>> scrapeListener : scrapeListeners) {
             try {
                 scrapeListener.onScrape(hardwareSpec);
-                synchronizationService.addToSyncQueue(hardwareSpec);
-
-                remoteSoldItemService.queueForPriceFetch(hardwareSpec.getEAN());
+                hardwareSyncService.addToSyncQueue(hardwareSpec);
+                for (String ean : hardwareSpec.getEANs()) {
+                    ebayAPIService.trackEAN(ean);
+                    remoteSoldItemService.queueForPriceFetch(ean);
+                }
             } catch (Throwable ex) {
                 LOGGER.log(Level.SEVERE, "Scraping listener " + scrapeListener.getClass().getSimpleName() + " produced an exception", ex);
             }

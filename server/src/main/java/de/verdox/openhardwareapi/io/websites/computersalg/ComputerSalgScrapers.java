@@ -55,7 +55,7 @@ public class ComputerSalgScrapers {
                 .withPSUScraper(psu -> psu.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();
                             target.setWattage((int) parseFirstInt("Leistung:", specs));
-                            target.setSize(extractFirstEnum(HardwareTypes.MotherboardFormFactor.class, "Netzteilformat", specs,
+                            target.setSize(extractFirstEnum(HardwareTypes.PSUFormFactor.class, "Netzteilformat", specs,
                                     (s, f) -> s.toUpperCase().contains(f.name())));
                             target.setEfficiencyRating(extractFirstEnum(HardwareTypes.PsuEfficiencyRating.class, "80 Plus Zertifikat:", specs,
                                     (s, r) -> s.toUpperCase().contains(r.name())));
@@ -90,9 +90,19 @@ public class ComputerSalgScrapers {
                             else target.setPcieVersion(HardwareTypes.PcieVersion.GEN3);
                             target.setVramGb(parseFirstInt("Grösse des Grafikspeichers:", specs));
                             target.setVramType(extractFirstEnum(HardwareTypes.VRAM_TYPE.class, "Grafikspeichertyp:", specs, (s, t) -> s.contains(t.name())));
-                        },
+
+                            target.setGpuCanonicalName(
+                                    extractFirstString("GPU Modell:", specs)
+                                            .replace("NVIDIA", "")
+                                            .replace("GeForce", "")
+                                            .replace("AMD", "")
+                                            .replace("Radeon", "")
+                                            .replace("Intel ", "").trim()
+                            );
+                            },
                         "https://www.computersalg.de/l/4177/nvidia",
-                        "https://www.computersalg.de/l/4178/amd"))
+                        "https://www.computersalg.de/l/4178/amd")
+                )
 
                 // RAM (Varianten)
                 .withRAMScraper("RAM", ram -> ram

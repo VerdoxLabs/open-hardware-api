@@ -25,10 +25,6 @@ public class CaseKingScrapers {
                 .withShouldSavePredicate((s, document) -> {
                     return document.selectFirst("div#maincontent") != null;
                 })
-                .withBaseLogic((scrapedSpecs, hardwareSpec) -> {
-                    // Caseking: mappe "HERSTELLER" auf unser "manufacturer"
-                    scrapedSpecs.specs().put("manufacturer", scrapedSpecs.specs().get("HERSTELLER"));
-                })
 
                 // --- CPU ---
                 .withCPUScrape(cpuScrape -> cpuScrape
@@ -74,6 +70,15 @@ public class CaseKingScrapers {
                                     } else {
                                         gpu.setPcieVersion(HardwareTypes.PcieVersion.GEN3);
                                     }
+
+                                    gpu.setGpuCanonicalName(
+                                            extractFirstString("GPU-Serienname", specs)
+                                                    .replace("NVIDIA", "")
+                                                    .replace("GeForce", "")
+                                                    .replace("AMD", "")
+                                                    .replace("Radeon", "")
+                                                    .replace("Intel ", "").trim()
+                                    );
 
                                     gpu.setVramType(extractFirstEnum(HardwareTypes.VRAM_TYPE.class, "GPU-Speichertyp", specs, (s, v) -> s.contains(v.name())));
                                     gpu.setVramGb(parseFirstInt("GPU-Speichergröße (GB)", specs));
@@ -219,7 +224,7 @@ public class CaseKingScrapers {
                                         }
                                     }
 
-                                    psu.setSize(extractFirstEnum(HardwareTypes.MotherboardFormFactor.class, "Netzteilformat", specs,
+                                    psu.setSize(extractFirstEnum(HardwareTypes.PSUFormFactor.class, "Netzteilformat", specs,
                                             (s, f) -> s.toUpperCase().contains(f.name())));
                                 },
                                 "https://www.caseking.de/pc-komponenten/netzteile")

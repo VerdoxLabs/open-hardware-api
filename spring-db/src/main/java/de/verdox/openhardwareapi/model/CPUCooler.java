@@ -1,7 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
 
-import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -18,6 +17,10 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "CPUCooler.All",
+        includeAllAttributes = true
+)
 public class CPUCooler extends HardwareSpec<CPUCooler> {
     @Override
     public void merge(CPUCooler other) {
@@ -32,7 +35,7 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
     private HardwareTypes.CoolerType type = HardwareTypes.CoolerType.UNKNOWN; // Luft oder AIO
 
 
-    @ElementCollection(fetch = FetchType.EAGER)
+    @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "cooler_supported_sockets", joinColumns = @JoinColumn(name = "spec_id"))
     @Enumerated(EnumType.STRING)
     @Column(name = "socket")
@@ -55,7 +58,7 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
                 ", tdpWatts=" + tdpWatts +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';

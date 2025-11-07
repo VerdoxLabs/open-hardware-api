@@ -4,7 +4,22 @@ server:
   address: 0.0.0.0
   compression.enabled: true
   compression.mime-types: application/json,application/x-ndjson
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
 logging:
   level:
     org.atmosphere: warn
+
+
+sync:
+  flush-interval-ms: 60000
+  flush-threshold: 100
+  bulk:
+    all-or-nothing: false
+    max-batch-size: 200
+
+spring.jpa.properties.hibernate.default_batch_fetch_size: 64

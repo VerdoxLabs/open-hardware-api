@@ -9,7 +9,10 @@ import lombok.Setter;
 import org.hibernate.annotations.NaturalId;
 
 import java.time.LocalDate;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -35,57 +38,52 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     @NotBlank
     protected String model;
 
-    @NaturalId(mutable = true)
-    @Column(name = "ean", length = 14, unique = true)
-    protected String EAN;
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+            name = "hardware_spec_eans",
+            joinColumns = @JoinColumn(name = "spec_id")
+    )
+    @Column(name = "ean", length = 14, nullable = false)
+    protected Set<String> EANs = new HashSet<>();
 
+    @NaturalId(mutable = true)
+    @Column(name = "mpn", unique = true)
     protected String MPN;
 
     protected LocalDate launchDate;
 
-    public void setEAN(String ean) {
+    public void addEAN(String ean) {
         if (ean == null || ean.isEmpty()) {
-            this.EAN = null;
             return;
         }
-
-        this.EAN = ean;
+        this.EANs.add(normalizeEan(ean));
     }
 
-    /**
-     * Freitext-Tags (z.B. "gaming", "workstation")
-     */
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "hardware_spec_tags", joinColumns = @JoinColumn(name = "spec_id"))
-    @Column(name = "tag")
-    protected Set<String> tags = new LinkedHashSet<>();
-
-
-    /**
-     * Beliebige zusätzliche Schlüssel/Wert-Eigenschaften.
-     */
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "hardware_spec_attributes", joinColumns = @JoinColumn(name = "spec_id"))
-    @MapKeyColumn(name = "attr_key")
-    @Column(name = "attr_value", length = 2000)
-    protected Map<String, String> attributes = new LinkedHashMap<>();
+    // Mini-Helper
+    public static String normalizeEan(String raw) {
+        if (raw == null) return null;
+        String t = raw.trim().replaceAll("[^0-9]", "");
+        if (t.isEmpty()) return null;
+        if (t.length() == 12) t = "0" + t; // UPC-A -> EAN-13
+        return (t.length() == 13 || t.length() == 14) ? t : null;
+    }
 
     public abstract void checkIfLegal();
 
     @PrePersist
     public void sanitizeNumbers() {
-        HardwareSpecificRepo.normalizeEAN_MPN(this.EAN);
         HardwareSpecificRepo.normalizeEAN_MPN(this.MPN);
+        setEANs(this.EANs);
     }
 
     public void tryMerge(HardwareSpec<?> incoming) {
-        if(incoming.getClass().equals(this.getClass())) {
+        if (incoming.getClass().equals(this.getClass())) {
             merge((SELF) incoming);
         }
     }
 
     public void merge(SELF other) {
-        mergeString(other, HardwareSpec::getEAN, HardwareSpec::setEAN);
+        mergeSet(other, HardwareSpec::getEANs);
         mergeString(other, HardwareSpec::getMPN, HardwareSpec::setMPN);
         mergeString(other, HardwareSpec::getModel, HardwareSpec::setModel);
         mergeString(other, HardwareSpec::getManufacturer, HardwareSpec::setManufacturer);

@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.Positive;
 import lombok.*;
 
+import java.util.Objects;
+
 @Embeddable
 @Getter
 @Setter
@@ -24,4 +26,16 @@ public class PcieSlot {
 
     @Positive
     private Integer quantity; // Anzahl gleicher Slots
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        PcieSlot pcieSlot = (PcieSlot) o;
+        return version == pcieSlot.version && Objects.equals(lanes, pcieSlot.lanes);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(version, lanes);
+    }
 }

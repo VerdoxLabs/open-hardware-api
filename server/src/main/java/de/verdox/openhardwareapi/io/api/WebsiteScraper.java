@@ -46,8 +46,9 @@ public class WebsiteScraper {
 
     public <HARDWARE extends HardwareSpec<HARDWARE>> WebsiteScraper withScrape(String id, Supplier<HARDWARE> constructor, Consumer<SpecificScrape<HARDWARE>> builder) {
         SpecificScrape<HARDWARE> specificScrape = new SpecificScrape<>(id, EAN -> {
+            Class<HARDWARE> clazz = (Class<HARDWARE>) constructor.get().getClass();
             try {
-                HARDWARE found = service.findByEAN(EAN);
+                HARDWARE found = service.findByEAN(clazz, EAN);
                 if (found == null) {
                     return constructor.get();
                 }
@@ -185,6 +186,11 @@ public class WebsiteScraper {
             if (mainEntry != null) {
                 var main = new WebsiteCatalogScraper<HARDWARE>(domain, mainEntry.subId, mainEntry.urls) {
                     @Override
+                    public String baseURL() {
+                        return domain;
+                    }
+
+                    @Override
                     public String id() {
                         return mainEntry.subId;
                     }
@@ -216,8 +222,13 @@ public class WebsiteScraper {
             for (Entry<HARDWARE> entry : entries) {
                 set.add(new WebsiteCatalogScraper<>(domain, entry.subId, entry.urls) {
                     @Override
+                    public String baseURL() {
+                        return domain;
+                    }
+
+                    @Override
                     public String id() {
-                        return entry.subId;
+                        return mainEntry.subId + "/" + entry.subId;
                     }
 
                     @Override
@@ -255,6 +266,10 @@ public class WebsiteScraper {
             String EAN = scrapedSpecs.specs().getOrDefault("EAN", List.of("---")).getFirst();
             String MPN = scrapedSpecs.specs().getOrDefault("MPN", List.of("---")).getFirst();
 
+            if (EAN.length() == 12) {
+                EAN = "0" + EAN;
+            }
+
             HARDWARE hw = query.findHardwareOrCreate(EAN);
 
             if (baseLogic != null) {
@@ -262,7 +277,7 @@ public class WebsiteScraper {
             }
 
             if (!EAN.equals("---")) {
-                hw.setEAN(EAN);
+                hw.addEAN(EAN);
             }
 
             if (!MPN.equals("---")) {
@@ -275,13 +290,12 @@ public class WebsiteScraper {
             String model = "";
             String manufacturer = "";
 
-            if(mod != null) {
+            if (mod != null) {
                 model = !mod.isEmpty() ? mod.getFirst() : "";
             }
-            if(manu != null) {
+            if (manu != null) {
                 manufacturer = !manu.isEmpty() ? manu.getFirst() : "";
             }
-
 
 
             if (!model.isBlank()) {

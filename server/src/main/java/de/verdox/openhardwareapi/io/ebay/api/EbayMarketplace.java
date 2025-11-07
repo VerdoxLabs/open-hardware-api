@@ -1,5 +1,6 @@
-package de.verdox.openhardwareapi.io.ebay;
+package de.verdox.openhardwareapi.io.ebay.api;
 
+import de.verdox.openhardwareapi.io.ebay.EbayDateParser;
 import lombok.Getter;
 
 import java.text.NumberFormat;

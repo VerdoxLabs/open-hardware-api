@@ -17,7 +17,11 @@ import java.io.UncheckedIOException;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -71,6 +75,10 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     }
 
 
+    public Document fetch(String domain, String id, String url, Duration ttl) throws MalformedURLException, ChallengeFoundException {
+        return fetch(domain, id, url, ttl, false);
+    }
+
     /**
      * Haupteinstieg: Seite unter einer festen ID-Gruppe fetchen.
      *
@@ -79,35 +87,44 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
      * @param url    Ziel-URL
      * @param ttl    Cache-Gültigkeit; {@code null} oder {@code Duration.ZERO} = Cache immer gültig
      */
-    public Document fetch(String domain, String id, String url, Duration ttl) throws MalformedURLException, ChallengeFoundException {
+    public Document fetch(String domain, String id, String url, Duration ttl, boolean skipIfNotCache) throws MalformedURLException, ChallengeFoundException {
         validateDomain(domain);
         validateId(id);
         String canonUrl = ScrapingPaths.urlCanonical(url);
         PageKey key = new PageKey(domain, id, canonUrl);
 
-        // 1) Cache prüfen (TTL-Strategie kannst du bei Bedarf verfeinern – z. B. Sidecar-Timestamps im Cache)
-        Optional<String> cached = cache.loadHtml(key)
-                .flatMap(html -> isFreshEnough(key, ttl) ? Optional.of(html) : Optional.empty());
+        // 1) Cache prüfen (TTL)
+        Optional<String> cached = cache.loadHtml(key).flatMap(html -> isFreshEnough(key, ttl) ? Optional.of(html) : Optional.empty());
 
         if (cached.isPresent()) {
             Document cachedDocument = Jsoup.parse(cached.get(), baseUri(domain));
 
             if (isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument)) {
                 ScrapingService.LOGGER.log(Level.INFO, "Removing cached challenge page: " + canonUrl);
-
+                deleteCached(key); // <<< NEU
             }
             else if (shouldSavePage == null || !shouldSavePage.test(canonUrl, cachedDocument)) {
                 ScrapingService.LOGGER.log(Level.INFO, "Removing page that should not be saved : " + canonUrl);
+                deleteCached(key); // <<< NEU
             }
             else {
                 return cachedDocument;
             }
         }
 
+        if(skipIfNotCache) {
+            return Document.createShell(url);
+        }
+
         // 2) Live laden via Selenium
-        ScrapingService.LOGGER.log(Level.FINER, "Cache miss → Selenium fetch: " + canonUrl + " [" + domain + ":" + id + "]");
+        ScrapingService.LOGGER.log(Level.INFO, "Cache miss → Selenium fetch: " + canonUrl + " [" + domain + ":" + id + "]");
         String html = fetchWithSelenium(canonUrl);
         html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
 
         Document doc = Jsoup.parse(html, baseUri(domain));
 
@@ -116,15 +133,14 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             try {
                 Thread.sleep(1000);
                 HtmlSlimmer.slimHtml(webDriver.getPageSource(), canonUrl, new HtmlSlimmer.Options());
-            } catch (InterruptedException e) {
-
-            }
+            } catch (InterruptedException ignored) {}
         }
-
 
         doc = Jsoup.parse(html, baseUri(domain));
         if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
             ScrapingService.LOGGER.log(Level.INFO, "Challenge page detected for URL: " + canonUrl);
+            // Sicherheitshalber: keinen Challenge-HTML persistieren
+            deleteCached(key); // <<< NEU
             throw new ChallengeFoundException();
         }
 
@@ -134,10 +150,13 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             } catch (UncheckedIOException e) {
                 ScrapingService.LOGGER.log(Level.SEVERE, "Failed to persist HTML for: " + canonUrl + " [" + domain + ":" + id + "]", e);
             }
+        } else {
+            deleteCached(key);
         }
 
         return doc;
     }
+
 
     /* ---------------------------------------------------------
        Driver-Handling
@@ -239,6 +258,43 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
        Helpers / Policies
        --------------------------------------------------------- */
 
+    /**
+     * Einfache TTL-Policy:
+     * - null oder Duration.ZERO → immer frisch
+     * - ansonsten: hier könntest du z. B. File-Zeitstempel im Cache prüfen.
+     * Da {@link ScrapingCache} abstrakt ist, wird standardmäßig "true" geliefert.
+     */
+    /**
+     * TTL-Policy:
+     * - null, ZERO oder negativ ⇒ Cache gilt immer als frisch (kein Re-Fetch).
+     * - sonst: prüfe mtime der Cache-Datei gegen now()-ttl.
+     */
+    private boolean isFreshEnough(PageKey key, Duration ttl) {
+        if (ttl == null || ttl.isZero() || ttl.isNegative()) return true;
+        try {
+            Path file = fileFor(key);
+            if (!Files.exists(file)) return false;
+            FileTime lastModified = Files.getLastModifiedTime(file);
+            Instant cutoff = Instant.now().minus(ttl);
+            return lastModified.toInstant().isAfter(cutoff);
+        } catch (Exception e) {
+            // Defensive: bei Fehler lieber als „nicht frisch“ behandeln → neu laden
+            return false;
+        }
+    }
+
+    /** Pfad der Cache-Datei (zentral, falls sich die Logik in ScrapingPaths mal ändert). */
+    private static Path fileFor(PageKey key) {
+        return ScrapingPaths.fileFor(key.domain(), key.id(), key.url());
+    }
+
+    /** Alte/ungültige Cache-Datei entfernen (ohne harte Fehler). */
+    private void deleteCached(PageKey key) {
+        try {
+            Files.deleteIfExists(fileFor(key));
+        } catch (Exception ignored) {}
+    }
+
     private static String baseUri(String domain) {
         return "https://" + domain + "/";
     }
@@ -253,18 +309,6 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     private static void validateId(String id) {
         if (id == null) throw new IllegalArgumentException("id must not be null");
         if (id.trim().isEmpty()) throw new IllegalArgumentException("id must not be empty");
-    }
-
-    /**
-     * Einfache TTL-Policy:
-     * - null oder Duration.ZERO → immer frisch
-     * - ansonsten: hier könntest du z. B. File-Zeitstempel im Cache prüfen.
-     * Da {@link ScrapingCache} abstrakt ist, wird standardmäßig "true" geliefert.
-     */
-    private boolean isFreshEnough(PageKey key, Duration ttl) {
-        if (ttl == null || ttl.isZero() || ttl.isNegative()) return true;
-        // TODO: Implementiere eine echte TTL-Prüfung (z. B. über Sidecar-Metadaten im Cache).
-        return true;
     }
 
     @Override

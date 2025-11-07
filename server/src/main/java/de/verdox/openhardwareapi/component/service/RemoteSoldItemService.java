@@ -1,9 +1,13 @@
 package de.verdox.openhardwareapi.component.service;
 
 import de.verdox.openhardwareapi.component.repository.RemoteSoldItemRepository;
-import de.verdox.openhardwareapi.io.ebay.EbayMarketplace;
 import de.verdox.openhardwareapi.io.ebay.EbayScraper;
+import de.verdox.openhardwareapi.io.ebay.EbaySoldItem;
+import de.verdox.openhardwareapi.io.ebay.api.EbayCategory;
+import de.verdox.openhardwareapi.io.ebay.api.EbayMarketplace;
+import de.verdox.openhardwareapi.model.HardwareSpec;
 import de.verdox.openhardwareapi.model.RemoteSoldItem;
+import de.verdox.openhardwareapi.model.dto.PricePointUploadDto;
 import de.verdox.openhardwareapi.model.values.Currency;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -12,59 +16,82 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 
 @Service
 @Transactional
 public class RemoteSoldItemService {
+
     private final RemoteSoldItemRepository repo;
+    private final PricePointSyncService pricePointSyncService;
     private final EbayScraper ebayBackgroundScraper = new EbayScraper("background_job");
     private final EbayScraper ebayInstant = new EbayScraper("instant_service");
+    private final HardwareSpecService hardwareSpecService;
+    private final Map<String, CompletableFuture<Void>> jobs = new ConcurrentHashMap<>();
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
 
-    public RemoteSoldItemService(RemoteSoldItemRepository repo) {
+    public RemoteSoldItemService(RemoteSoldItemRepository repo, PricePointSyncService pricePointSyncService, HardwareSpecService hardwareSpecService) {
         this.repo = repo;
+        this.pricePointSyncService = pricePointSyncService;
+        this.hardwareSpecService = hardwareSpecService;
+    }
+
+    // --------------------------
+    // Public API
+    // --------------------------
+
+    /**
+     * Batch-Upload (idempotent). Rückgabe = nur tatsächlich eingefügte Entities (ohne IDs).
+     */
+    public List<RemoteSoldItem> createAll(Collection<PricePointUploadDto> dtos) {
+        if (dtos == null || dtos.isEmpty()) return List.of();
+        List<RemoteSoldItem> inserted = new ArrayList<>();
+
+        for (PricePointUploadDto dto : dtos) {
+            save(dto);
+        }
+        return inserted;
     }
 
     /**
-     * Durchschnitt der letzten 3 Monate (rollierend bis heute).
-     *
-     * @return Optional<BigDecimal> mit Scale=2, falls Daten vorhanden.
+     * Durchschnitt der letzten Monate (rollierend bis heute).
      */
-    // NEU: mit currency-Filter
     public Optional<BigDecimal> getCurrentAveragePriceForEan(String ean, Currency currency, int monthSince) {
-        fetchDataFromAllEbayMarketPlaces(ean, false);
         LocalDate from = LocalDate.now().minusMonths(normalizeMonths(monthSince));
-
         return repo.findAveragePriceSinceByCurrency(ean, from, currency).map(d -> BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
     }
 
     /**
-     * Komplette Preisreihe (für Graphen).
+     * Komplette Serie.
      */
     public List<RemoteSoldItemRepository.PricePoint> getAllPricesForEan(String ean) {
-        fetchDataFromAllEbayMarketPlaces(ean, false);
         return repo.findPriceSeriesByEan(ean);
     }
 
     /**
-     * Preisreihe (z. B. letzte 3 Monate), praktisch für „aktuelle“ Graphen.
+     * Serie seit X Monaten.
      */
     public List<RemoteSoldItemRepository.PricePoint> getRecentPricesForEan(String ean, int monthSince) {
-        fetchDataFromAllEbayMarketPlaces(ean, false);
         LocalDate from = LocalDate.now().minusMonths(normalizeMonths(monthSince));
         return repo.findPriceSeriesByEanSince(ean, from);
     }
 
-    public Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
-        Set<RemoteSoldItem> remoteItems = new HashSet<>();
+    // --------------------------
+    // Background Queue
+    // --------------------------
 
+    // --------------------------
+    // Internals
+    // --------------------------
+
+    /**
+     * Scrape alle gewünschten eBay-Marktplätze.
+     */
+    private Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
+        Set<RemoteSoldItem> remoteItems = new HashSet<>();
         EbayScraper ebayScraper = background ? ebayBackgroundScraper : ebayInstant;
 
         remoteItems.addAll(fetchDataFromEbay(ebayScraper, EbayMarketplace.GERMANY, EAN));
@@ -78,6 +105,7 @@ public class RemoteSoldItemService {
     private final AtomicBoolean currentBuffer = new AtomicBoolean(false);
 
     public void queueForPriceFetch(String EAN) {
+        if (EAN == null || EAN.isBlank()) return;
         if (currentBuffer.get())
             bufferA.add(EAN);
         else
@@ -100,29 +128,77 @@ public class RemoteSoldItemService {
         ScrapingService.LOGGER.log(Level.INFO, "Collected prices for " + elementsWithPrices + " / " + count + " products.");
     }
 
-    private List<RemoteSoldItem> fetchDataFromEbay(EbayScraper ebayScraper, EbayMarketplace ebayMarketplace, String EAN) {
+    private Set<RemoteSoldItem> fetchDataFromEbay(EbayScraper ebayScraper, EbayMarketplace ebayMarketplace, String EAN) {
         try {
-            List<RemoteSoldItem> scraped = ebayScraper.fetchByEan(ebayMarketplace, EAN, 1).stream().map(ebaySoldItem -> {
-                RemoteSoldItem remoteSoldItem = new RemoteSoldItem();
-                remoteSoldItem.setMarketPlaceDomain(ebayMarketplace.getDomain());
-                remoteSoldItem.setMarketPlaceItemID(ebaySoldItem.itemId());
-                remoteSoldItem.setEAN(EAN);
-                remoteSoldItem.setSellPrice(ebaySoldItem.price().value());
-                remoteSoldItem.setCurrency(ebaySoldItem.price().currency());
-                remoteSoldItem.setSellDate(ebaySoldItem.soldDate());
-                return remoteSoldItem;
-            }).toList();
-            repo.saveAll(scraped);
-            return scraped;
+            Set<RemoteSoldItem> remoteItems = new HashSet<>();
+            final String ean = normalize(EAN);
+
+            HardwareSpec<?> hardwareSpec = hardwareSpecService.findByEAN(EAN);
+            if (hardwareSpec == null) {
+                return Set.of();
+            }
+
+            Class<? extends HardwareSpec<?>> clazz = (Class<? extends HardwareSpec<?>>) hardwareSpec.getClass();
+            EbayCategory ebayCategory = EbayCategory.fromType(clazz);
+            if (ebayCategory == null) {
+                return Set.of();
+            }
+
+            List<EbaySoldItem> fetched = new ArrayList<>();
+            fetched.addAll(ebayScraper.fetchByEan(ebayMarketplace, ean, ebayCategory, 1));
+
+            for (EbaySoldItem ebaySoldItem : fetched) {
+                var saved = save(ebayMarketplace.getDomain(), ebaySoldItem.itemId(), EAN, ebaySoldItem.price().value(), ebaySoldItem.price().currency(), ebaySoldItem.soldDate());
+                if (saved == null) continue;
+                remoteItems.add(saved);
+            }
+            return remoteItems;
         } catch (Throwable e) {
             ScrapingService.LOGGER.log(Level.FINE, "Could not scrape price for " + EAN + " on " + ebayMarketplace, e);
-            return List.of();
+            return Set.of();
         }
     }
 
-    private int normalizeMonths(int monthsSince) {
-        // <=0 → Default 3, und z. B. max 24 Monate als Sicherheitskappe
+    private synchronized RemoteSoldItem save(String marketPlaceDomain, String marketPlaceItemID, String ean, BigDecimal sellPrice, Currency currency, LocalDate sellDate) {
+
+        marketPlaceDomain = normalizeLower(marketPlaceDomain);
+        marketPlaceItemID = normalize(marketPlaceItemID);
+        ean = normalize(ean);
+        sellPrice = normalizePrice(sellPrice);
+
+        UUID derived = RemoteSoldItem.deriveUUID(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate);
+        if (repo.findById(derived).isPresent()) {
+            return null;
+        }
+        return repo.save(new RemoteSoldItem(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate));
+    }
+
+    private void save(PricePointUploadDto pricePointUploadDto) {
+        save(pricePointUploadDto.marketPlaceDomain(), pricePointUploadDto.marketPlaceItemID(), pricePointUploadDto.EAN(), pricePointUploadDto.sellPrice(), pricePointUploadDto.currency(), pricePointUploadDto.sellDate());
+    }
+
+    private static int normalizeMonths(int monthsSince) {
         if (monthsSince <= 0) return 3;
         return Math.min(monthsSince, 24);
+    }
+
+    private static String normalize(String s) {
+        return s == null ? null : s.trim();
+    }
+
+    private static String normalizeLower(String s) {
+        return s == null ? null : s.trim().toLowerCase();
+    }
+
+    private static BigDecimal normalizePrice(BigDecimal p) {
+        return p == null ? null : p.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static String key(String domain, String itemId, String ean, BigDecimal price, String currency, LocalDate date) {
+        return stringOrEmpty(domain) + "|" + stringOrEmpty(itemId) + "|" + stringOrEmpty(ean) + "|" + (price == null ? "" : price.stripTrailingZeros().toPlainString()) + "|" + stringOrEmpty(currency) + "|" + (date == null ? "" : date.toString());
+    }
+
+    private static String stringOrEmpty(String s) {
+        return s == null ? "" : s;
     }
 }

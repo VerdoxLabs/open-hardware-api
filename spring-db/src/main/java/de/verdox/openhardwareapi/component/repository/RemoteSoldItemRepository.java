@@ -8,42 +8,80 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, UUID> {
 
-public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, Long> {
     interface PricePoint {
-        LocalDate getSellPrice();   // = r.sellDate
-        BigDecimal getPrice();      // = r.price
-        String getCurrency();       // = r.currency
+        LocalDate getSellDate();   // = r.sellDate
+        BigDecimal getPrice();     // = r.price
+        Currency getCurrency();      // = r.currency
     }
 
-    // Alle Punkte (für Graphen)
+    interface EANPricePoint {
+        String getEan();
+        LocalDate getSellDate();   // = r.sellDate
+        BigDecimal getPrice();     // = r.price
+        Currency getCurrency();      // = r.currency
+    }
+
+    // --- Preis-Zeitreihen ----------------------------------------------------
+
     @Query("""
-            select r.sellDate as sellPrice, r.sellPrice as price, r.currency as currency
-            from RemoteSoldItem r
-            where r.EAN = :ean
-            order by r.sellDate asc
-            """)
+        select r.sellDate as sellDate, r.sellPrice as price, r.currency as currency
+        from RemoteSoldItem r
+        where r.ean = :ean
+        order by r.sellDate asc
+        """)
     List<PricePoint> findPriceSeriesByEan(@Param("ean") String ean);
 
-    // Punkte seit bestimmtem Datum
     @Query("""
-            select r.sellDate as sellPrice, r.sellPrice as price, r.currency as currency
-            from RemoteSoldItem r
-            where r.EAN = :ean and r.sellDate >= :from
-            order by r.sellDate asc
-            """)
+        select r.sellDate as sellDate, r.sellPrice as price, r.currency as currency
+        from RemoteSoldItem r
+        where r.ean = :ean and r.sellDate >= :from
+        order by r.sellDate asc
+        """)
     List<PricePoint> findPriceSeriesByEanSince(@Param("ean") String ean,
                                                @Param("from") LocalDate from);
 
-    // NEU: AVG für eine spezifische Währung
+    // --- Durchschnittspreis --------------------------------------------------
+
     @Query("""
-            select avg(r.sellPrice)
-            from RemoteSoldItem r
-            where r.EAN = :ean and r.sellDate >= :from and r.currency = :currency
-            """)
+        select avg(r.sellPrice)
+        from RemoteSoldItem r
+        where r.ean = :ean
+          and r.sellDate >= :from
+          and r.currency = :currency
+        """)
     Optional<Double> findAveragePriceSinceByCurrency(@Param("ean") String ean,
                                                      @Param("from") LocalDate from,
                                                      @Param("currency") Currency currency);
+
+    @Query("""
+    select percentile_cont(0.5) within group (order by r.sellPrice)
+    from RemoteSoldItem r
+    where r.ean in :eans
+      and r.sellDate >= :since
+      and r.currency = :currency
+    """)
+    BigDecimal medianPriceForEansSince(
+            @Param("eans") Collection<String> eans,
+            @Param("since") LocalDate since,
+            @Param("currency") Currency currency
+    );
+
+    @Query("""
+        select r.ean as ean, r.sellDate as sellDate, r.sellPrice as price, r.currency as currency
+        from RemoteSoldItem r
+        where r.ean in :eans
+          and r.currency = :currency
+          and r.sellDate >= :since
+        """)
+    List<EANPricePoint> findUnitPricesSince(
+            @Param("eans") Collection<String> eans,
+            @Param("since") LocalDate since,
+            @Param("currency") Currency currency
+    );
 }

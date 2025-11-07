@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -13,6 +14,10 @@ import lombok.Setter;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@NamedEntityGraph(
+        name = "Storage.All",
+        includeAllAttributes = true
+)
 public class Storage extends HardwareSpec<Storage> {
 
     @Override
@@ -25,11 +30,13 @@ public class Storage extends HardwareSpec<Storage> {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.StorageType storageType = HardwareTypes.StorageType.UNKNOWN; // HDD/SSD
 
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.StorageInterface storageInterface = HardwareTypes.StorageInterface.UNKNOWN;
 
 
@@ -56,7 +63,7 @@ public class Storage extends HardwareSpec<Storage> {
                 ", capacityGb=" + capacityGb +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';

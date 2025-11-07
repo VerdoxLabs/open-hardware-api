@@ -1,6 +1,7 @@
 package de.verdox.openhardwareapi.model;
 
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -17,6 +18,10 @@ import java.util.Set;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@NamedEntityGraph(
+        name = "Display.All",
+        includeAllAttributes = true
+)
 public class Display extends HardwareSpec<Display> {
 
     @Override
@@ -42,10 +47,12 @@ public class Display extends HardwareSpec<Display> {
     private Integer refreshRate = 0;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.DisplayPanel displayPanel = HardwareTypes.DisplayPanel.UNKNOWN;
 
     @Enumerated(EnumType.STRING)
-    @ElementCollection(fetch = FetchType.EAGER)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "display_sync", joinColumns = @JoinColumn(name = "spec_id"))
     private Set<HardwareTypes.DisplaySync> displaySyncs = new HashSet<>();
 
@@ -62,7 +69,7 @@ public class Display extends HardwareSpec<Display> {
     private Integer vgaPorts = 0;
 
     @PositiveOrZero
-    private Integer responseTimeMS = 0;
+    private Double responseTimeMS = 0D;
 
     @PositiveOrZero
     private Double inchSize = 0d;
@@ -104,7 +111,7 @@ public class Display extends HardwareSpec<Display> {
                 ", adjustableSize=" + adjustableSize +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 '}';
     }

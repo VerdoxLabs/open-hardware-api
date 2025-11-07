@@ -13,12 +13,12 @@ import java.util.regex.Pattern;
 
 public class CasekingScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
-    public void extractMultiPageURLs(String currentURL, Document page, Queue<String> multiPageURLs) {
+    public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
         for (Element element : page.select("li.page-item")) {
             if (element.text().equals(">")) {
                 var a = element.selectFirst("a");
                 if (a != null) {
-                    multiPageURLs.offer(a.attr("href"));
+                    multiPageURLs.offer(new MultiPageCandidate(a.attr("href")));
                     break;
                 }
             }
@@ -26,16 +26,15 @@ public class CasekingScrapingStrategy implements WebsiteScrapingStrategy {
     }
 
     @Override
-    public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+    public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
         for (Element element : page.select("div.product-tiles")) {
             var nextPage = element.selectFirst("a.badge-group-wrapper");
             if (nextPage != null) {
                 String nextUrl = nextPage.attr("href");
-                if(nextUrl.contains("https://www.caseking.de")) {
-                    singlePageURLs.add(nextPage.attr("href"));
-                }
-                else {
-                    singlePageURLs.add("https://www.caseking.de" + nextPage.attr("href"));
+                if (nextUrl.contains("https://www.caseking.de")) {
+                    singlePageURLs.add(new SinglePageCandidate(nextPage.attr("href")));
+                } else {
+                    singlePageURLs.add(new SinglePageCandidate("https://www.caseking.de" + nextPage.attr("href")));
                 }
             }
         }
@@ -46,6 +45,11 @@ public class CasekingScrapingStrategy implements WebsiteScrapingStrategy {
         Map<String, List<String>> specs = new HashMap<>();
         extractBaseInformation(page, specs);
         parseSpecificationsIfPossible(page, specs);
+
+        var manufacturer = page.selectFirst("product-detail-cta-box-brand-logo.w-auto.h-auto.mb-3");
+        if (manufacturer != null) {
+            specs.put("manufacturer", List.of(manufacturer.attr("alt")));
+        }
 
         if (specs.containsKey("Typ") && !specs.get("Typ").isEmpty()) {
             specs.put("model", specs.get("Typ"));

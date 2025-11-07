@@ -1,10 +1,8 @@
 package de.verdox.openhardwareapi.component.repository;
 
 import de.verdox.openhardwareapi.model.HardwareSpec;
-import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -19,63 +17,71 @@ public interface HardwareSpecificRepo<HARDWARE extends HardwareSpec<HARDWARE>> e
         return s.trim().replaceAll("[\\s\\-_.]", "").toUpperCase();
     }
 
-    Page<HARDWARE> findByModelContainingIgnoreCase(String model, Pageable pageable);
-
-    @Query("select h from HardwareSpec h where type(h) = :clazz")
-    Page<HARDWARE> findAllExact(@Param("clazz") Class<HARDWARE> clazz, Pageable pageable);
-
-    @Query("select count(h) from HardwareSpec h where type(h) = :clazz")
-    long countExact(@Param("clazz") Class<? extends HardwareSpec> clazz);
+    @Query("""
+        select h.id
+        from #{#entityName} h
+        order by h.id asc
+    """)
+    Page<Long> findPageIds(Pageable pageable);
 
     @Query("""
-               select h from HardwareSpec h
-               where type(h) = :clazz
-                 and lower(h.model) like lower(concat('%', :tokens, '%'))
-            """)
-    Page<HARDWARE> searchByModelTokensExact(@Param("clazz") Class<HARDWARE> clazz, @Param("tokens") String tokens, Pageable pageable);
+        select h
+        from #{#entityName} h
+        where h.id in :ids
+        order by h.id asc
+    """)
+    List<HARDWARE> findAllByIdInOrderByIdAsc(@Param("ids") List<Long> ids);
+
+    // (ean, entity) zurückgeben – wichtig, weil eine Entity mehrere EANs hat
+    @Query("""
+           select e, h
+           from CPU h
+           join h.EANs e
+           where e in :eans
+           """)
+    List<Object[]> findPairsByEans(@Param("eans") Set<String> eans);
 
     @Query("""
-               select count(h) from HardwareSpec h
-               where type(h) = :clazz
-                 and lower(h.model) like lower(concat('%', :tokens, '%'))
-            """)
-    long countByModelTokensExact(@Param("clazz") Class<? extends HardwareSpec> clazz, @Param("tokens") String tokens);
+           select h
+           from #{#entityName} h
+            where :ean member of h.EANs
+           """)
+    Optional<HARDWARE> findByEan(@Param("ean") String ean);
 
-    default Page<HARDWARE> searchByModelTokens(String search, Pageable pageable) {
-        if (search == null || search.isBlank()) {
-            return findAll(pageable);
-        }
 
-        String[] tokens = search.toLowerCase().split("\\s+");
-
-        Specification<HARDWARE> spec = (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            for (String token : tokens) {
-                predicates.add(cb.like(cb.lower(root.get("model")), "%" + token + "%"));
-            }
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-
-        return findAll(spec, pageable);
-    }
-
-    long countByModelContainingIgnoreCase(String model);
-
-    Optional<HARDWARE> findByEANIgnoreCase(String ean);
+    // Optional: Existenzcheck
+    @Query("""
+           select count(h) > 0
+           from #{#entityName} h
+           join h.EANs e
+           where e = :ean
+           """)
+    boolean existsByEan(@Param("ean") String ean);
 
     Optional<HARDWARE> findByMPNIgnoreCase(String mpn);
 
-    @Query("select h from HardwareSpec h where h.EAN in :eans")
+    @Query("""
+           select distinct h
+           from CPU h
+           join h.EANs e
+           where e in :eans
+           """)
     List<HARDWARE> findAllByEANNormIn(@Param("eans") Set<String> eans);
 
     @Query("select h from HardwareSpec h where h.MPN in :mpns")
     List<HARDWARE> findAllByMPNNormIn(@Param("mpns") Set<String> mpns);
 
-    // Helper zum Map-Bau:
-    default Map<String, HARDWARE> findAllByEANInNormalized(Set<String> eans) {
-        if (eans.isEmpty()) return Map.of();
-        return findAllByEANNormIn(eans).stream()
-                .collect(Collectors.toMap(HARDWARE::getEAN, h -> h));
+    // Bequeme Map<EAN, Entity>
+    default Map<String, HARDWARE> findAllByEanIn(Set<String> eans) {
+        if (eans == null || eans.isEmpty()) return Map.of();
+        var rows = findPairsByEans(eans);
+        Map<String, HARDWARE> out = new LinkedHashMap<>(rows.size());
+        for (Object[] r : rows) {
+            String ean = (String) r[0];
+            @SuppressWarnings("unchecked") HARDWARE hw = (HARDWARE) r[1];
+            out.put(ean, hw); // dank UNIQUE(ean) eindeutig
+        }
+        return out;
     }
 
     default Map<String, HARDWARE> findAllByMPNInNormalized(Set<String> mpns) {

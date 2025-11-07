@@ -8,12 +8,12 @@ import java.util.*;
 
 public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
-    public void extractMultiPageURLs(String currentURL, Document page, Queue<String> multiPageURLs) {
+    public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
         for (Element mt2 : page.select("div.mt-2")) {
             for (Element a : mt2.select("a")) {
                 if (a.attr("aria-label").equals("Nächste Seite")) {
                     String linkToNextPage = a.attr("href");
-                    multiPageURLs.add(linkToNextPage);
+                    multiPageURLs.add(new MultiPageCandidate(linkToNextPage));
                     break;
                 }
             }
@@ -21,7 +21,7 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
     }
 
     @Override
-    public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+    public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
         for (Element containerListing : page.select("div.grid-container.listing")) {
             var a = containerListing.selectFirst("a");
             if (a == null) {
@@ -31,7 +31,7 @@ public class AlternateScrapingStrategy implements WebsiteScrapingStrategy {
             if (url.isBlank()) {
                 continue;
             }
-            singlePageURLs.add(url);
+            singlePageURLs.add(new SinglePageCandidate(url));
         }
     }
 

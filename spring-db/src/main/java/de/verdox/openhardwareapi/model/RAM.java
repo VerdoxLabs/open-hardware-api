@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -13,6 +14,10 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "RAM.All",
+        includeAllAttributes = true
+)
 public class RAM extends HardwareSpec<RAM> {
 
     @Override
@@ -30,6 +35,7 @@ public class RAM extends HardwareSpec<RAM> {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.RamType type = HardwareTypes.RamType.UNKNOWN;
 
     @PositiveOrZero
@@ -54,9 +60,17 @@ public class RAM extends HardwareSpec<RAM> {
     @PositiveOrZero
     private Integer rowActiveTime = 0; // TRAS
 
+    @Column(name = "is_ecc", nullable = false)
+    private boolean isECC = false;
+
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Transient
+    public int getTotalSizeGB() {
+        return sizeGb * sticks;
     }
 
     @Override
@@ -72,7 +86,7 @@ public class RAM extends HardwareSpec<RAM> {
                 ", rowPrechargeTime=" + rowPrechargeTime +
                 ", rowActiveTime=" + rowActiveTime +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';

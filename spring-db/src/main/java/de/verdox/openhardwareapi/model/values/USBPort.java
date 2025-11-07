@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.Positive;
 import lombok.*;
 
+import java.util.Objects;
+
 @Embeddable
 @Getter
 @Setter
@@ -25,4 +27,16 @@ public class USBPort {
 
     @Positive
     private Integer quantity; // Anzahl gleicher Slots
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        USBPort usbPort = (USBPort) o;
+        return type == usbPort.type && version == usbPort.version && Objects.equals(quantity, usbPort.quantity);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, version, quantity);
+    }
 }

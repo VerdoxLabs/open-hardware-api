@@ -38,10 +38,10 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
     private final ObjectMapper om = new ObjectMapper();
 
-    public DPGPUScraper(HardwareSpecService hardwareSpecService) {
+    public DPGPUScraper() {
     }
 
-    public Set<GPUChip> scrape(Set<Document> pages, ScrapeListener<GPUChip> scrapeListener) throws Throwable {
+    public Set<GPUChip> scrape(ScrapeListener<GPUChip> scrapeListener) throws Throwable {
         URI jsonAsset = resolveLatestJsonAssetUrl();
 
         // 2) Download
@@ -68,6 +68,11 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
             idx++;
         }
         return result;
+    }
+
+    @Override
+    public String baseURL() {
+        return "api.github.com/repos/painebenjamin/dbgpu";
     }
 
     @Override
@@ -187,14 +192,6 @@ public class DPGPUScraper implements ComponentWebScraper<GPUChip> {
         //gpu.setPowerConnectors(parsePowerConnectors(power));
 
         // Optional: Tags/Attributes aus Restfeldern (falls HardwareSpec das hat)
-        // Alles, was nicht gemappt wurde, in attributes ablegen
-
-        // Einfache Tag-Heuristik
-        Set<String> tags = new LinkedHashSet<>();
-        if (busInterface != null) tags.add(busInterface);
-        if (memoryType != null) tags.add(memoryType);
-        gpu.setTags(tags);
-
         return gpu;
     }
 

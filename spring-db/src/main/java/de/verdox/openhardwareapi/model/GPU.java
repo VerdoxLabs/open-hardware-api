@@ -1,6 +1,8 @@
 package de.verdox.openhardwareapi.model;
 
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.annotation.PostConstruct;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -16,6 +18,10 @@ import java.util.Objects;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "GPU.All",
+        includeAllAttributes = true
+)
 public class GPU extends HardwareSpec<GPU> {
 
     @Override
@@ -27,21 +33,31 @@ public class GPU extends HardwareSpec<GPU> {
         mergeEnum(other, GPU::getVramType, GPU::setVramType, HardwareTypes.VRAM_TYPE.UNKNOWN);
         mergeNumber(other, GPU::getVramGb, GPU::setVramGb);
         mergeNumber(other, GPU::getTdp, GPU::setTdp);
+        merge(other, GPU::getGpuCanonicalName, GPU::setGpuCanonicalName, s -> s == null || s.isBlank() || s.equals("unknown"));
+    }
+
+    @Column(nullable = false, length = 255)
+    private String gpuCanonicalName = "unknown";
+
+    public void setGpuCanonicalName(String gpuCanonicalName) {
+        this.gpuCanonicalName = gpuCanonicalName.trim().replaceAll("\\s+", " ");
     }
 
     @PositiveOrZero
     private double lengthMm = 0;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = true)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
     @JoinColumn(name = "gpu_chip_id",
             nullable = true,
             foreignKey = @ForeignKey(name = "fk_gpu__chip"))
     private GPUChip chip;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PcieVersion pcieVersion = HardwareTypes.PcieVersion.UNKNOWN;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.VRAM_TYPE vramType = HardwareTypes.VRAM_TYPE.UNKNOWN; // z.B. GDDR6, GDDR6X
 
     @PositiveOrZero
@@ -53,6 +69,13 @@ public class GPU extends HardwareSpec<GPU> {
     public void checkIfLegal() {
 
     }
+
+    @PostConstruct
+    public void sanitize() {
+        this.setGpuCanonicalName(getGpuCanonicalName());
+    }
+
+
 
     @Override
     public String toString() {
@@ -66,7 +89,7 @@ public class GPU extends HardwareSpec<GPU> {
                 ", tdp=" + tdp +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
     }

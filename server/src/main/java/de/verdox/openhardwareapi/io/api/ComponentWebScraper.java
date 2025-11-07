@@ -17,10 +17,12 @@ import java.util.stream.Stream;
 
 public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
-    record ScrapedSpecPage(String url, Document page){}
+    record ScrapedSpecPage(WebsiteScrapingStrategy.SinglePageCandidate singlePageCandidate, Document page){}
     record ScrapedSpecs(String url, Map<String, List<String>> specs){}
 
     WebsiteScrapingStrategy getWebsiteScrapingStrategy();
+
+    String baseURL();
 
     String id();
 

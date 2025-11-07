@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import de.verdox.openhardwareapi.model.CPU;
+import de.verdox.openhardwareapi.model.HardwareTypes;
+import de.verdox.openhardwareapi.model.dto.PricePointUploadDto;
 import de.verdox.openhardwareapi.model.values.Currency;
 import lombok.Getter;
 import org.springframework.http.HttpHeaders;
@@ -25,6 +26,7 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilder;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -33,9 +35,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.time.LocalDate;
+import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -43,7 +45,7 @@ import java.util.stream.Collectors;
  * Eine einzige Klasse für alle REST-Calls. Einfach mit Base-URL instanziieren.
  */
 // ... imports bleiben wie gehabt
-import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
+
 // ^ falls du keine Filter brauchst, kannst du den Import entfernen (wird hier nicht zwingend genutzt)
 
 public final class HardwareSpecClient {
@@ -60,17 +62,33 @@ public final class HardwareSpecClient {
     }
 
     public HardwareSpecClient(String baseUrl, ObjectMapper mapper) {
-        this.urlApiV1 = baseUrl + API_V1;
+        this.urlApiV1 = baseUrl + "/api/v1";
         LOGGER.info("HardwareSpecClient created for base url " + baseUrl + " and api v1 endpoint " + trimTrailingSlash(this.urlApiV1));
         this.om = mapper;
-        var httpClient = HttpClient.create().followRedirect(true).responseTimeout(Duration.ofSeconds(15));
+
+        // >>> Neu: Pool mit Grenzen + Idle-/LifeTime
+        ConnectionProvider provider = ConnectionProvider.builder("ohw-api-pool")
+                .maxConnections(50)                 // Poolgröße (bei Bedarf kleiner, z.B. 20)
+                .pendingAcquireMaxCount(200)        // Warteschlangenlimit (Backpressure)
+                .maxIdleTime(Duration.ofSeconds(30))// Idle-Verbindung entsorgen
+                .maxLifeTime(Duration.ofMinutes(2)) // Verbindungslebenszeit begrenzen
+                .lifo()                             // bessere Cache-Treffer
+                .build();
+
+        HttpClient httpClient = HttpClient.create(provider)
+                .followRedirect(true)
+                .responseTimeout(Duration.ofSeconds(15))
+                .keepAlive(true)
+                .compress(true);
+
         this.http = WebClient.builder()
-                .exchangeStrategies(ExchangeStrategies.builder().codecs(clientCodecConfigurer ->
-                        clientCodecConfigurer.defaultCodecs().maxInMemorySize((int) DataSize.ofMegabytes(128).toBytes())
-                ).build())
+                .exchangeStrategies(ExchangeStrategies.builder()
+                        .codecs(c -> c.defaultCodecs().maxInMemorySize((int) DataSize.ofMegabytes(64).toBytes()))
+                        .build()
+                )
                 .baseUrl(trimTrailingSlash(this.urlApiV1))
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader("Accept", "application/json")
                 .codecs(c -> c.defaultCodecs().jackson2JsonDecoder(new Jackson2JsonDecoder(mapper)))
                 .build();
     }
@@ -80,28 +98,47 @@ public final class HardwareSpecClient {
        ========================================================= */
 
     public <T> PageResponse<T> list(String type, int page, int size, String sort, Class<T> entityClass) {
-        // 1) URI bauen
         String uri = uriBuilder("/specs/{type}", b -> {
             b.queryParam("page", page);
             b.queryParam("size", size);
             if (sort != null && !sort.isBlank()) b.queryParam("sort", sort);
         }, type);
 
-        // 2) Metadaten separat holen (HEAD/GET-Fallback ist in pages(...) schon drin)
-        HardwareSpecClient.PagesMeta meta = pages(type, size);
+        PagesMeta meta = pages(type, size);
 
-        // 3) Streambar lesen: erst NDJSON probieren, sonst JSON-Array (als Rückfall)
         List<T> content = http.get()
                 .uri(uri)
-                .accept(org.springframework.http.MediaType.APPLICATION_NDJSON, org.springframework.http.MediaType.APPLICATION_JSON)
-                .retrieve()
-                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
-                .bodyToFlux(entityClass)                 // <— streamt Item für Item
-                .collectList()                           // wir sammeln die Page in eine List (nicht byte[])
-                .blockOptional()
-                .orElseGet(java.util.List::of);
+                .accept(MediaType.APPLICATION_NDJSON, MediaType.APPLICATION_JSON)
+                .exchangeToMono(resp -> {
+                    if (!resp.statusCode().is2xxSuccessful()) return toProblem(resp).flatMap(Mono::error);
+                    MediaType ct = resp.headers().contentType().orElse(MediaType.APPLICATION_JSON);
 
-        // 4) PageResponse zusammensetzen (nutzt Meta aus HEAD/GET)
+                    if (MediaType.APPLICATION_NDJSON.isCompatibleWith(ct)) {
+                        return resp.bodyToFlux(entityClass).collectList();
+                    }
+
+                    // JSON: Array oder Page-Objekt unterscheiden
+                    return resp.bodyToMono(byte[].class).flatMap(bytes -> {
+                        try {
+                            JsonNode n = om.readTree(bytes);
+                            List<T> list = new ArrayList<>();
+                            if (n.isArray()) {
+                                for (JsonNode item : n) list.add(om.treeToValue(item, entityClass));
+                            } else if (n.has("content") && n.get("content").isArray()) {
+                                for (JsonNode item : n.get("content")) list.add(om.treeToValue(item, entityClass));
+                            } else {
+                                return Mono.error(new IllegalStateException(
+                                        "Unexpected JSON shape for list: " + truncate(new String(bytes, StandardCharsets.UTF_8), 1000)));
+                            }
+                            return Mono.just(list);
+                        } catch (IOException e) {
+                            return Mono.error(new IllegalStateException("Cannot parse list response", e));
+                        }
+                    });
+                })
+                .blockOptional()
+                .orElseGet(List::of);
+
         int totalPages = meta != null ? meta.totalPages() : -1;
         long totalElements = meta != null ? meta.totalElements() : -1;
         return new PageResponse<>(content, page, size, totalPages, totalElements);
@@ -126,7 +163,20 @@ public final class HardwareSpecClient {
        ========           WRITE: UPLOADS                 =======
        ========================================================= */
 
-    public <T> T uploadOne(String type, T entity, Class<T> entityClass) {
+    public BulkResult priceItemUpload(Collection<PricePointUploadDto> toUpload) {
+        byte[] bytes = http.post()
+                .uri(uriBuilder("/prices/points", uriBuilder -> {
+                }))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(toUpload)
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .block();
+        return parseBulkResult(bytes);
+    }
+
+    public <T> T uploadHardwareOne(String type, T entity, Class<T> entityClass) {
         return http.post()
                 .uri("/specs/{type}", type)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -135,7 +185,7 @@ public final class HardwareSpecClient {
                 .block();
     }
 
-    public String uploadOneRaw(String type, String json) {
+    public String uploadHardwareOneRaw(String type, String json) {
         return http.post()
                 .uri("/specs/{type}", type)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -144,7 +194,7 @@ public final class HardwareSpecClient {
                 .block();
     }
 
-    public BulkResult bulkUpload(String type, List<?> entities, boolean allOrNothing) {
+    public BulkResult bulkHardwareUpload(String type, List<?> entities, boolean allOrNothing) {
         byte[] bytes = http.post()
                 .uri(uriBuilder("/specs/{type}/bulk", b -> b.queryParam("allOrNothing", allOrNothing), type))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -156,7 +206,7 @@ public final class HardwareSpecClient {
         return parseBulkResult(bytes);
     }
 
-    public BulkResult bulkUploadNdjson(String type, List<?> entities, boolean allOrNothing) {
+    public BulkResult bulkHardwareUploadNdjson(String type, List<?> entities, boolean allOrNothing) {
         String ndjson = entities.stream()
                 .map(e -> {
                     try {
@@ -178,7 +228,7 @@ public final class HardwareSpecClient {
         return parseBulkResult(bytes);
     }
 
-    public BulkResult bulkUploadFile(String type, Path file, boolean allOrNothing) {
+    public BulkResult bulkHardwareUploadFile(String type, Path file, boolean allOrNothing) {
         byte[] data = readAllBytes(file);
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add("file", new ByteArrayResourceWithFilename(data, file.getFileName().toString()));
@@ -220,10 +270,242 @@ public final class HardwareSpecClient {
                 .block();
     }
 
+// ---------- NEW: Cluster-Preis-Endpunkte ----------
+
+    public Optional<BigDecimal> getMedianPerGbRam(HardwareTypes.RamType type, Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/ram/median-per-gb", b -> {
+            b.queryParam("type", type.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        byte[] bytes = http.get().uri(uri)
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .blockOptional().orElse(null);
+        if (bytes == null || bytes.length == 0) return Optional.empty();
+        try {
+            var node = om.readTree(bytes);
+            if (node.isNull()) return Optional.empty();
+            return Optional.of(om.treeToValue(node, BigDecimal.class));
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot parse median-per-gb RAM response", e);
+        }
+    }
+
+    public Optional<BigDecimal> getEstimatedRamStickPrice(
+            HardwareTypes.RamType type,
+            long speedMtps,
+            int capacityGb,
+            boolean isKit,
+            boolean ecc,
+            Currency currency,
+            int monthsSince
+    ) {
+        String uri = uriBuilder("/cluster/prices/ram/estimate", b -> {
+            b.queryParam("type", type.name());
+            b.queryParam("speed", speedMtps);
+            b.queryParam("capacityGb", capacityGb);
+            b.queryParam("isKit", isKit);
+            b.queryParam("ecc", ecc);
+            if (currency != null)
+                b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    public Optional<BigDecimal> getMedianPerGbRamBySpeed(HardwareTypes.RamType type, long speedMtps, Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/ram/median-per-gb/by-speed", b -> {
+            b.queryParam("type", type.name());
+            b.queryParam("speed", speedMtps);
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    public Optional<BigDecimal> getMedianMainboard(HardwareTypes.CpuSocket socket, HardwareTypes.Chipset chipset,
+                                                   HardwareTypes.MotherboardFormFactor formFactor,
+                                                   Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/mainboard/median", b -> {
+            b.queryParam("socket", socket.name());
+            b.queryParam("chipset", chipset.name());
+            b.queryParam("formFactor", formFactor.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    /**
+     * Defaults: USD, monthsSince=3
+     */
+    public BulkAvgCurrentResponse getAvgCurrentBulk(List<String> eans) {
+        return getAvgCurrentBulk(eans, Currency.US_DOLLAR, 3);
+    }
+
+    public BulkAvgCurrentResponse getAvgCurrentBulk(List<String> eans, Currency currency, int monthsSince) {
+        if (eans == null || eans.isEmpty()) {
+            return new BulkAvgCurrentResponse(currency.name(), Math.max(0, monthsSince), List.of());
+        }
+        BulkAvgCurrentRequest req = new BulkAvgCurrentRequest(eans, Math.max(0, monthsSince), currency != null ? currency.name() : null);
+
+        byte[] bytes = this.http.post()
+                .uri("/prices/avg-current/bulk")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(req)
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .block();
+
+        try {
+            return this.om.readValue(bytes, BulkAvgCurrentResponse.class);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot parse bulk avg-current response: " + new String(bytes, StandardCharsets.UTF_8), e);
+        }
+    }
+
+    /**
+     * Bequeme Map-Variante: nur gefundene Werte (found==true) werden aufgenommen.
+     */
+    public Map<String, BigDecimal> getAvgCurrentBulkMap(List<String> eans, Currency currency, int monthsSince) {
+        BulkAvgCurrentResponse resp = getAvgCurrentBulk(eans, currency, monthsSince);
+        if (resp.results() == null) return Map.of();
+        return resp.results().stream()
+                .filter(AvgEntry::found)
+                .collect(Collectors.toMap(AvgEntry::ean, AvgEntry::value, (a, b) -> a, LinkedHashMap::new)); // Request-Reihenfolge bewahren
+    }
+
+    /**
+     * Batch-Helfer: ruft den Bulk-Endpoint mehrfach auf, wenn die EAN-Liste groß ist.
+     *
+     * @param batchSize z.B. 400 (sollte <= Server-Limit sein)
+     */
+    public Map<String, BigDecimal> getAvgCurrentBulkMapBatched(List<String> eans, Currency currency, int monthsSince, int batchSize) {
+        if (eans == null || eans.isEmpty()) return Map.of();
+        int size = eans.size();
+        LinkedHashMap<String, BigDecimal> out = new LinkedHashMap<>(size);
+        for (int i = 0; i < size; i += batchSize) {
+            List<String> slice = eans.subList(i, Math.min(i + batchSize, size));
+            Map<String, BigDecimal> part = getAvgCurrentBulkMap(slice, currency, monthsSince);
+            out.putAll(part);
+        }
+        return out;
+    }
+
+    // --- AVG per-GB RAM ---
+    public Optional<BigDecimal> getAveragePerGbRam(HardwareTypes.RamType type, Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/ram/avg-per-gb", b -> {
+            b.queryParam("type", type.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    public Optional<BigDecimal> getAveragePerGbRamBySpeed(HardwareTypes.RamType type, long speedMtps, Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/ram/avg-per-gb/by-speed", b -> {
+            b.queryParam("type", type.name());
+            b.queryParam("speed", speedMtps);
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    // --- AVG Mainboard ---
+    public Optional<BigDecimal> getAverageMainboard(HardwareTypes.CpuSocket socket, HardwareTypes.Chipset chipset,
+                                                    HardwareTypes.MotherboardFormFactor formFactor,
+                                                    Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/mainboard/avg", b -> {
+            b.queryParam("socket", socket.name());
+            b.queryParam("chipset", chipset.name());
+            b.queryParam("formFactor", formFactor.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    // --- AVG PSU ---
+    public Optional<BigDecimal> getAveragePsu(long wattage, HardwareTypes.PsuEfficiencyRating rating,
+                                              HardwareTypes.PSU_MODULARITY modularity,
+                                              Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/psu/avg", b -> {
+            b.queryParam("wattage", wattage);
+            b.queryParam("rating", rating.name());
+            b.queryParam("modularity", modularity.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    // --- AVG GPU ---
+    public Optional<BigDecimal> getAverageGpu(String gpuName, Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/gpu/avg", b -> {
+            b.queryParam("gpuName", gpuName);
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+
+    public Optional<BigDecimal> getMedianPsu(long wattage, HardwareTypes.PsuEfficiencyRating rating,
+                                             HardwareTypes.PSU_MODULARITY modularity,
+                                             Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/psu/median", b -> {
+            b.queryParam("wattage", wattage);
+            b.queryParam("rating", rating.name());
+            b.queryParam("modularity", modularity.name());
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    public Optional<BigDecimal> getMedianGpu(String gpuName,
+                                             Currency currency, int monthsSince) {
+        String uri = uriBuilder("/cluster/prices/gpu/median", b -> {
+            b.queryParam("gpuName", gpuName);
+            if (currency != null) b.queryParam("currency", currency.name());
+            b.queryParam("monthsSince", monthsSince);
+        });
+        return getPriceDto(uri);
+    }
+
+    // shared helper
+    private Optional<BigDecimal> getPriceDto(String uri) {
+        byte[] bytes = http.get().uri(uri)
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .blockOptional().orElse(null);
+        if (bytes == null || bytes.length == 0) return Optional.empty();
+        try {
+            var node = om.readTree(bytes);
+            if (node.isMissingNode() || node.isNull()) return Optional.empty();
+            return Optional.of(om.treeToValue(node, BigDecimal.class));
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot parse price dto: " + new String(bytes, java.nio.charset.StandardCharsets.UTF_8), e);
+        }
+    }
+
     // Bestehend …
-    public Optional<BigDecimal> getAverageCurrentPrice(String ean) { return getAverageCurrentPrice(ean, 3); }
-    public Optional<BigDecimal> getAverageCurrentPrice(String ean, int monthsSince) { return getAverageCurrentPrice(ean, Currency.US_DOLLAR, monthsSince); }
-    public Optional<BigDecimal> getAverageCurrentPrice(String ean, Currency currency) { return getAverageCurrentPrice(ean, currency, 3); }
+    public Optional<BigDecimal> getAverageCurrentPrice(String ean) {
+        return getAverageCurrentPrice(ean, 3);
+    }
+
+    public Optional<BigDecimal> getAverageCurrentPrice(String ean, int monthsSince) {
+        return getAverageCurrentPrice(ean, Currency.US_DOLLAR, monthsSince);
+    }
+
+    public Optional<BigDecimal> getAverageCurrentPrice(String ean, Currency currency) {
+        return getAverageCurrentPrice(ean, currency, 3);
+    }
 
     public Optional<BigDecimal> getAverageCurrentPrice(String ean, Currency currency, int monthsSince) {
         String base = monthsSince > 0 ? "/prices/{ean}/avg-current/{monthsSince}" : "/prices/{ean}/avg-current";
@@ -233,8 +515,10 @@ public final class HardwareSpecClient {
                 ? uriBuilder(base, b -> b.queryParam("currency", currency.name()), ean, monthsSince)
                 : uriBuilder(base, b -> b.queryParam("currency", currency.name()), ean))
                 : (monthsSince > 0
-                ? uriBuilder(base, b -> { }, ean, monthsSince)
-                : uriBuilder(base, b -> { }, ean));
+                ? uriBuilder(base, b -> {
+        }, ean, monthsSince)
+                : uriBuilder(base, b -> {
+        }, ean));
 
         byte[] bytes = http.get()
                 .uri(uri)
@@ -254,7 +538,8 @@ public final class HardwareSpecClient {
         }
     }
 
-    public record PricePoint(java.time.LocalDate sellPrice, java.math.BigDecimal price, String currency) {}
+    public record PricePoint(java.time.LocalDate sellPrice, java.math.BigDecimal price, String currency) {
+    }
 
     public java.util.List<PricePoint> getPriceSeries(String ean) {
         return http.get()
@@ -288,6 +573,8 @@ public final class HardwareSpecClient {
                 .findAndRegisterModules()
                 .configure(SerializationFeature.WRITE_ENUMS_USING_INDEX, false)
                 .configure(SerializationFeature.WRITE_ENUMS_USING_TO_STRING, true)
+                .configure(DeserializationFeature.READ_ENUMS_USING_TO_STRING, true)
+                .configure(DeserializationFeature.READ_ENUMS_USING_TO_STRING, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
@@ -304,10 +591,55 @@ public final class HardwareSpecClient {
     }
 
     private Mono<? extends Throwable> toProblem(ClientResponse resp) {
-        return resp.bodyToMono(ProblemDetail.class)
-                .defaultIfEmpty(ProblemDetail.forStatus(resp.statusCode()))
-                .map(ApiProblemException::new);
+        return resp.bodyToMono(byte[].class)
+                .defaultIfEmpty(new byte[0])
+                .map(bytes -> {
+                    String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+
+                    // Reason/Status-Text (Spring 6-kompatibel)
+                    String reason = (resp.statusCode() instanceof org.springframework.http.HttpStatus hs)
+                            ? hs.getReasonPhrase()
+                            : resp.statusCode().toString();
+
+                    // Versuche RFC7807-Felder rauszuziehen
+                    String title = null, detail = null, type = null, instance = null, code = null;
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode n = om.readTree(bytes);
+                        if (n != null && !n.isMissingNode() && !n.isNull()) {
+                            title = optText(n, "title");
+                            detail = optText(n, "detail");
+                            type = optText(n, "type");
+                            instance = optText(n, "instance");
+                            code = optText(n, "code");
+                        }
+                    } catch (Exception ignore) { /* Body war kein JSON, raw verwenden */ }
+
+                    // Baue eine aussagekräftige Fehlermeldung
+                    String msg = "HTTP " + resp.statusCode().value() + " " + reason
+                            + (title != null ? " | title=" + title : "")
+                            + (code != null ? " | code=" + code : "")
+                            + (instance != null ? " | instance=" + instance : "")
+                            + (detail != null ? " | detail=" + detail : " | body=" + raw);
+
+                    // Optional: Loggen
+                    LOGGER.log(Level.SEVERE, "GET failed: " + msg + "\n" + raw);
+
+                    // Exception mit Body zurückgeben
+                    return org.springframework.web.reactive.function.client.WebClientResponseException.create(
+                            resp.statusCode().value(),
+                            reason,
+                            resp.headers().asHttpHeaders(),
+                            raw.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                            java.nio.charset.StandardCharsets.UTF_8
+                    );
+                });
     }
+
+    private static String optText(com.fasterxml.jackson.databind.JsonNode n, String field) {
+        com.fasterxml.jackson.databind.JsonNode x = n.get(field);
+        return (x != null && !x.isNull()) ? x.asText() : null;
+    }
+
 
     // ---------- Neues, einheitliches 2xx/Error-Handling ----------
     private static boolean isJson(MediaType ct) {
@@ -400,7 +732,8 @@ public final class HardwareSpecClient {
         }
     }
 
-    public record PagesMeta(long totalElements, int pageSize, int totalPages) { }
+    public record PagesMeta(long totalElements, int pageSize, int totalPages) {
+    }
 
     private Mono<PagesMeta> fetchPagesMetaViaGet(String type, int size) {
         String getUri = uriBuilder("/specs/{type}/pages", b -> b.queryParam("size", size), type);
@@ -417,48 +750,95 @@ public final class HardwareSpecClient {
     }
 
     private static long parseLongHeader(HttpHeaders h, String name, long def) {
-        try { return Long.parseLong(h.getFirst(name)); } catch (Exception e) { return def; }
+        try {
+            return Long.parseLong(h.getFirst(name));
+        } catch (Exception e) {
+            return def;
+        }
     }
 
     private static int parseIntHeader(HttpHeaders h, String name, int def) {
-        try { return Integer.parseInt(h.getFirst(name)); } catch (Exception e) { return def; }
+        try {
+            return Integer.parseInt(h.getFirst(name));
+        } catch (Exception e) {
+            return def;
+        }
     }
 
-    public record PageResponse<T>(List<T> content, int number, int size, int totalPages, long totalElements) { }
-    public record TypeMeta(String type, String entityClass, long count, Instant lastUpdated) { }
-    public record BulkResult(int savedCount, int failedCount, List<BulkError> errors) { }
-    public record BulkError(int index, String error) { }
+    public record PageResponse<T>(List<T> content, int number, int size, int totalPages, long totalElements) {
+    }
+
+    public record TypeMeta(String type, String entityClass, long count, Instant lastUpdated) {
+    }
+
+    public record BulkResult(int savedCount, int failedCount, List<BulkError> errors) {
+    }
+
+    public record BulkError(int index, String error) {
+    }
+
+    public record BulkAvgCurrentRequest(
+            List<String> eans,
+            Integer monthsSince,
+            String currency // z.B. "EUR", "USD"
+    ) {
+    }
+
+    public record BulkAvgCurrentResponse(
+            String currency,
+            int monthsSince,
+            List<AvgEntry> results
+    ) {
+    }
+
+    public record AvgEntry(
+            String ean,
+            BigDecimal value,
+            boolean found
+    ) {
+    }
 
     public static final class ApiProblemException extends RuntimeException {
         private final ProblemDetail problem;
+
         public ApiProblemException(ProblemDetail p) {
             super(p.getDetail() != null ? p.getDetail() : String.valueOf(p.getTitle()));
             this.problem = p;
         }
-        public ProblemDetail getProblem() { return problem; }
+
+        public ProblemDetail getProblem() {
+            return problem;
+        }
     }
 
     static final class ByteArrayResourceWithFilename extends org.springframework.core.io.ByteArrayResource {
         private final String filename;
+
         ByteArrayResourceWithFilename(byte[] byteArray, String filename) {
             super(byteArray);
             this.filename = filename;
         }
-        @Override public String getFilename() { return filename; }
+
+        @Override
+        public String getFilename() {
+            return filename;
+        }
     }
 
     public static void main(String[] args) {
-        var client = new HardwareSpecClient("http://192.168.178.75:8085");
+        var client = new HardwareSpecClient("http://localhost:5050");
 
-        client.listTypes();
+        client.priceItemUpload(Set.of(
+                new PricePointUploadDto(
+                        "ebay.de",
 
-        List<CPU> cpu = client.list("cpu", 0, 100, "id,asc", CPU.class).content();
-        System.out.println("Received: " + cpu.size());
-
-        if (!cpu.isEmpty()) {
-            System.out.println("Uploading: " + cpu);
-            client.uploadOne("cpu", cpu.getFirst(), CPU.class);
-        }
+                        "1234",
+                        "123456789",
+                        BigDecimal.ONE,
+                        Currency.EURO,
+                        LocalDate.now()
+                )
+        ));
     }
 }
 

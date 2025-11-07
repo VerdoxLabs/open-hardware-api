@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.values.M2Slot;
 import de.verdox.openhardwareapi.model.values.PcieSlot;
 import de.verdox.openhardwareapi.model.values.USBPort;
@@ -19,6 +20,10 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "Motherboard.All",
+        includeAllAttributes = true
+)
 public class Motherboard extends HardwareSpec<Motherboard> {
 
     @Override
@@ -39,19 +44,23 @@ public class Motherboard extends HardwareSpec<Motherboard> {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.CpuSocket socket = HardwareTypes.CpuSocket.UNKNOWN;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.Chipset chipset = HardwareTypes.Chipset.UNKNOWN;
 
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Column(nullable = false)
     private HardwareTypes.MotherboardFormFactor formFactor = HardwareTypes.MotherboardFormFactor.UNKNOWN;
 
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Column(nullable = false)
     private HardwareTypes.RamType ramType = HardwareTypes.RamType.UNKNOWN;
 
@@ -65,16 +74,16 @@ public class Motherboard extends HardwareSpec<Motherboard> {
     @PositiveOrZero
     private Integer sataSlots = 0;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "m2Slots", joinColumns = @JoinColumn(name = "spec_id"))
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "M2SLOTS", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "PCIE_VERSION", "SUPPORTED_INTERFACE"}))
     private Set<M2Slot> m2Slots = new HashSet<>();
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "pcieSlots", joinColumns = @JoinColumn(name = "spec_id"))
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "pcieSlots", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "VERSION", "LANES"}))
     private Set<PcieSlot> pcieSlots = new HashSet<>();
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "usbPort", joinColumns = @JoinColumn(name = "spec_id"))
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "usbPort", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "TYPE", "VERSION"}))
     private Set<USBPort> usbPort = new HashSet<>();
 
     @PositiveOrZero
@@ -101,9 +110,25 @@ public class Motherboard extends HardwareSpec<Motherboard> {
                 ", usb3Headers=" + usb3Headers +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
+    }
+
+    public boolean isCompatibleWith(CPU cpu) {
+        return cpu.getSocket().equals(this.socket);
+    }
+
+    public boolean isCompatibleWith(RAM ram) {
+        return ram.getType().equals(this.ramType);
+    }
+
+    public boolean isCompatibleWith(PCCase pcCase) {
+        return pcCase.getMotherboardSupport().contains(getFormFactor());
+    }
+
+    public boolean isCompatibleWith(GPU gpu) {
+        return this.getPcieSlots().stream().anyMatch(pcieSlot -> pcieSlot.getLanes() == 16 && pcieSlot.getVersion().equals(gpu.getPcieVersion()));
     }
 }

@@ -8,11 +8,11 @@ import java.util.*;
 
 public class MindfactoryScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
-    public void extractMultiPageURLs(String currentURL, Document page, Queue<String> multiPageURLs) {
+    public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
         for (Element element : page.select("ul.pagination")) {
             for (Element a : element.select("a")) {
                 if (a.attr("aria-label").equals("Nächste Seite")) {
-                    multiPageURLs.offer(a.attr("href"));
+                    multiPageURLs.offer(new MultiPageCandidate(a.attr("href")));
                     break;
                 }
             }
@@ -20,11 +20,11 @@ public class MindfactoryScrapingStrategy implements WebsiteScrapingStrategy {
     }
 
     @Override
-    public void extractSinglePagesURLs(String currentUrl, Document page, Set<String> singlePageURLs) {
+    public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
         for (Element pcontent : page.select("div.pcontent")) {
             var nextPage = pcontent.selectFirst("a.p-complete-link");
             if (nextPage != null) {
-                singlePageURLs.add(nextPage.attr("href"));
+                singlePageURLs.add(new SinglePageCandidate(nextPage.attr("href")));
             }
         }
     }
@@ -33,6 +33,7 @@ public class MindfactoryScrapingStrategy implements WebsiteScrapingStrategy {
     public Map<String, List<String>> extractSpecMap(Document page) throws Throwable {
         Map<String, List<String>> specs = new HashMap<>();
         specs.put("EAN", List.of(page.select("span.product-ean").text()));
+        specs.put("MPN", List.of(page.select("span.sku-model").text()));
 
         for (Element element : page.select("div.row.no-gutters.flex-md.flex-lg")) {
             var h1 = element.selectFirst("h1");

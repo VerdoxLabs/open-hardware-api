@@ -5,6 +5,8 @@ import de.verdox.openhardwareapi.io.api.Price;
 import de.verdox.openhardwareapi.io.api.selenium.CookieJar;
 import de.verdox.openhardwareapi.io.api.selenium.FScrapingCache;
 import de.verdox.openhardwareapi.io.api.selenium.SeleniumBasedWebScraper;
+import de.verdox.openhardwareapi.io.ebay.api.EbayCategory;
+import de.verdox.openhardwareapi.io.ebay.api.EbayMarketplace;
 import de.verdox.openhardwareapi.model.values.Currency;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -27,7 +29,7 @@ public class EbayScraper {
     private final SeleniumBasedWebScraper seleniumBasedWebScraper;
 
     public EbayScraper(String id) {
-        this.seleniumBasedWebScraper  = new SeleniumBasedWebScraper(id, new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
+        this.seleniumBasedWebScraper = new SeleniumBasedWebScraper(id, new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
         seleniumBasedWebScraper.setIsChallengePage((s, doc) -> {
 
             if (doc.selectFirst("div.pgHeading") != null) {
@@ -42,50 +44,34 @@ public class EbayScraper {
     /**
      * Baut die eBay-Such-URL für verkaufte/beendete Angebote zu einer EAN (inkl. mkcid=2).
      */
-    public static String buildUrl(EbayMarketplace marketplace, String ean, int page, int perPage) {
+    public static String buildUrl(EbayMarketplace marketplace, String ean, EbayCategory ebayCategory, int page, int perPage) {
         String q = URLEncoder.encode(ean, StandardCharsets.UTF_8);
         int ipg = Math.max(10, Math.min(240, perPage));
 
         int pgn = Math.max(1, page);
 
         if (marketplace.equals(EbayMarketplace.GERMANY)) {
-            return "https://www." + marketplace.getDomain() + "/sch/i.html"
-                    + "?_nkw=" + q
-                    + "&_sacat=0"
-                    + "&LH_Complete=1"
-                    + "&LH_Sold=1"
-                    + "&LH_TitleDesc=1"
-                    + "&LH_SellerType=1"
-                    + "&_fslt=1"
-                    + "&_ipg=" + ipg
-                    + "&_pgn=" + pgn
-                    + "&LH_PrefLoc=3"
-                    + "&mkcid=2";
+            return "https://www." + marketplace.getDomain() + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&LH_SellerType=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&LH_PrefLoc=3" + "&mkcid=2";
         } else {
-            return "https://www." + marketplace.getDomain() + "/sch/i.html"
-                    + "?_nkw=" + q
-                    + "&_sacat=0"
-                    + "&LH_Complete=1"
-                    + "&LH_Sold=1"
-                    + "&LH_TitleDesc=1"
-                    + "&_fslt=1"
-                    + "&_ipg=" + ipg
-                    + "&_pgn=" + pgn
-                    + "&mkcid=2";
+            return "https://www." + marketplace.getDomain() + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&mkcid=2";
         }
     }
 
     /**
      * Holt N Seiten (1..pages) und gibt die gesammelten Items zurück.
      */
-    public List<EbaySoldItem> fetchByEan(EbayMarketplace marketplace, String ean, int pages) throws Exception {
+    public List<EbaySoldItem> fetchByEan(EbayMarketplace marketplace, String ean, EbayCategory ebayCategory, int pages) throws Exception {
         List<EbaySoldItem> out = new ArrayList<>();
         int maxPages = Math.max(1, Math.min(10, pages));
 
         for (int p = 1; p <= maxPages; p++) {
-            String url = buildUrl(marketplace, ean, p, 240);
+            String url = buildUrl(marketplace, ean, ebayCategory, p, 240);
 
             Document doc = seleniumBasedWebScraper.fetch(marketplace.getDomain(), ean, url, Duration.ofDays(7));
+
+            if (doc.selectFirst("div.srp-save-null-search") != null) {
+                continue;
+            }
 
             String titleTag = Optional.ofNullable(doc.title()).orElse("").toLowerCase(Locale.ROOT);
             if (titleTag.contains("störung") || titleTag.contains("geprüft") || titleTag.contains("captcha")) {

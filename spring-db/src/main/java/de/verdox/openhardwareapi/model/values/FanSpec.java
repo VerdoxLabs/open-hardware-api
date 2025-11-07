@@ -10,6 +10,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @ToString
+@EqualsAndHashCode
 public class FanSpec {
     @Positive
     private Integer diameterMm; // z.B. 120

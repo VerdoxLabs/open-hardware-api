@@ -1,8 +1,11 @@
 package de.verdox.openhardwareapi.model.values;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Getter;
 
 @Getter
+
+@JsonFormat(shape = JsonFormat.Shape.STRING)
 public enum Currency {
     EURO("EUR", "€"),
     US_DOLLAR("USD", "$"),
@@ -30,6 +33,6 @@ public enum Currency {
                 return value;
             }
         }
-        return null;
+        return Currency.US_DOLLAR;
     }
 }

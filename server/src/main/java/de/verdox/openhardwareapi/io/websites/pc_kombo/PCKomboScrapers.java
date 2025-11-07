@@ -43,7 +43,7 @@ public class PCKomboScrapers {
                             target.setDisplayPorts((int) parseFirstInt("DisplayPort", specs));
                             target.setDviPorts((int) parseFirstInt("DVI", specs));
                             target.setVgaPorts((int) parseFirstInt("VGA", specs));
-                            target.setResponseTimeMS((int) parseFirstInt("Response Time", specs));
+                            target.setResponseTimeMS(parseFirstDouble("Response Time", specs));
                             target.setInchSize(parseFirstDouble("Size", specs));
                             if (resolutions.length >= 1) target.setResWidth(parseIntSafely(resolutions[0]));
                             if (resolutions.length >= 2) target.setResHeight(parseIntSafely(resolutions[1]));
@@ -109,7 +109,7 @@ public class PCKomboScrapers {
                 .withPSUScraper(psu -> psu.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();
                             target.setWattage((int) parseFirstInt("Watt", specs));
-                            target.setSize(extractFirstEnum(HardwareTypes.MotherboardFormFactor.class, "Size", specs, (s, ff) -> ff.getName().equalsIgnoreCase(s)));
+                            target.setSize(extractFirstEnum(HardwareTypes.PSUFormFactor.class, "Size", specs, (s, ff) -> ff.getName().equalsIgnoreCase(s)));
                             target.setEfficiencyRating(extractFirstEnum(HardwareTypes.PsuEfficiencyRating.class, "Efficiency Rating", specs, (s, e) -> e.name().contains(s.toUpperCase())));
                             Set<PowerConnector> cons = new HashSet<>();
                             int c8 = Math.toIntExact(parseFirstInt("PCI-E cables 8-pin", specs));
@@ -145,6 +145,16 @@ public class PCKomboScrapers {
                             target.setLengthMm(parseFirstDouble("Length", specs));
                             target.setTdp(parseFirstDouble("TDP", specs));
                             target.setVramGb(parseFirstDouble("Vram", specs));
+
+                            target.setGpuCanonicalName(
+                                    extractFirstString("gpu-chip", specs)
+                                            .replace("NVIDIA", "")
+                                            .replace("GeForce", "")
+                                            .replace("AMD", "")
+                                            .replace("Radeon", "")
+                                            .replace("Intel ", "")
+                                            .trim()
+                            );
                         },
                         "https://www.pc-kombo.com/us/components/gpus"))
 
@@ -166,7 +176,7 @@ public class PCKomboScrapers {
                             var specs = scraped.specs();
                             int sticks = Math.toIntExact(parseFirstInt("Sticks", specs));
                             target.setType(extractDdrType(extractFirstString("Ram Type", specs)));
-                            target.setSizeGb(Math.toIntExact(parseFirstInt("Size", specs)));
+                            target.setSizeGb(Math.toIntExact(parseFirstInt("Size", specs) / sticks));
                             target.setSpeedMtps(Math.toIntExact(parseFirstInt("Clock", specs)));
                             int[] timings = parseTimings(extractFirstString("Timings", specs));
                             target.setCasLatency(timings[0]);
@@ -219,7 +229,7 @@ public class PCKomboScrapers {
             }
             return result;
         } catch (Exception e) {
-            ScrapingService.LOGGER.log(Level.SEVERE, "Failed to parse timings " + timings, e.getMessage());
+            ScrapingService.LOGGER.log(Level.FINE, "Failed to parse timings " + timings, e.getMessage());
             return new int[4];
         }
     }

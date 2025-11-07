@@ -35,31 +35,32 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
     @Override
     public Stream<ScrapedSpecPage> downloadWebsites() throws Throwable {
-        Set<String> singlePages = new HashSet<>();
+        Set<WebsiteScrapingStrategy.SinglePageCandidate> singlePages = new HashSet<>();
         Set<String> alreadyCollected = new HashSet<>();
-        Queue<String> multiPages = new ArrayDeque<>(urlsToScrape);
+        Queue<WebsiteScrapingStrategy.MultiPageCandidate> multiPages = new ArrayDeque<>(urlsToScrape.stream().map(WebsiteScrapingStrategy.MultiPageCandidate::new).toList());
 
         if (multiPages.isEmpty()) {
             ScrapingService.LOGGER.log(Level.SEVERE, "No scraping url defined for " + domain + "[" + id + "]");
             return Stream.of();
         }
 
+        AtomicBoolean challengeFound = new AtomicBoolean(false);
+
         while (!multiPages.isEmpty()) {
-            String nextUrl = multiPages.poll();
-            if (alreadyCollected.contains(nextUrl)) {
+            WebsiteScrapingStrategy.MultiPageCandidate nextCandidate = multiPages.poll();
+            if (alreadyCollected.contains(nextCandidate.url())) {
                 continue;
             }
-            alreadyCollected.add(nextUrl);
+            alreadyCollected.add(nextCandidate.url());
 
             try {
-                Document doc = seleniumBasedWebScraper.fetch(domain, id, nextUrl, Duration.ofDays(30));
-                Thread.sleep(1000);
-                websiteScrapingStrategy.extractMultiPageURLs(nextUrl, doc, multiPages);
-                websiteScrapingStrategy.extractSinglePagesURLs(nextUrl, doc, singlePages);
+                Document doc = seleniumBasedWebScraper.fetch(domain, id, nextCandidate.url(), Duration.ofDays(30), challengeFound.get());
+                websiteScrapingStrategy.extractMultiPageURLs(nextCandidate.url(), doc, multiPages);
+                websiteScrapingStrategy.extractSinglePagesURLs(nextCandidate.url(), doc, singlePages);
 
             } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
                 ScrapingService.LOGGER.log(Level.SEVERE, "Challenge found on domain " + domain);
-                break;
+                challengeFound.set(true);
             }
         }
 
@@ -67,34 +68,26 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
         ScrapingService.LOGGER.log(Level.INFO, "Found " + singlePages.size() + " scraping pages for " + topLevelHost + " [" + id + "]");
 
-        AtomicBoolean challengeFound = new AtomicBoolean(false);
-
-        return singlePages
-                .stream()
-                .filter(url -> !alreadyCollected.contains(url))
-                .filter(s -> !challengeFound.get())
-                .map(url -> {
-                    try {
-                        Thread.sleep(1000);
-                        return new ScrapedSpecPage(url, seleniumBasedWebScraper.fetch(domain, id, url, Duration.ofDays(90)));
-                    }
-                    catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
-                        challengeFound.set(true);
-                        ScrapingService.LOGGER.log(Level.SEVERE, "Challenge found on domain " + domain);
-                        return null;
-                    }
-                    catch (Throwable ex) {
-                        ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape single page " + url, ex);
-                        return null;
-                    } finally {
-                        alreadyCollected.add(url);
-
-                    }
-                }).filter(Objects::nonNull);
+        return singlePages.stream().filter(singlePageCandidate -> !alreadyCollected.contains(singlePageCandidate.url())).map(singlePageCandidate -> {
+            try {
+                return new ScrapedSpecPage(singlePageCandidate, seleniumBasedWebScraper.fetch(domain, id, singlePageCandidate.url(), Duration.ofDays(90), challengeFound.get()));
+            } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
+                challengeFound.set(true);
+                ScrapingService.LOGGER.log(Level.SEVERE, "Challenge found on domain " + domain);
+                return null;
+            } catch (Throwable ex) {
+                ScrapingService.LOGGER.log(Level.SEVERE, "Could not scrape single page " + singlePageCandidate.url(), ex);
+                return null;
+            } finally {
+                alreadyCollected.add(singlePageCandidate.url());
+            }
+        }).filter(Objects::nonNull);
     }
 
     @Override
     public ScrapedSpecs extract(ScrapedSpecPage scrapedPage) throws Throwable {
-        return new ScrapedSpecs(scrapedPage.url(), websiteScrapingStrategy.extractSpecMap(scrapedPage.page()));
+        Map<String, List<String>> specs = websiteScrapingStrategy.extractSpecMap(scrapedPage.page());
+        specs.putAll(scrapedPage.singlePageCandidate().specMap());
+        return new ScrapedSpecs(scrapedPage.singlePageCandidate().url(), specs);
     }
 }

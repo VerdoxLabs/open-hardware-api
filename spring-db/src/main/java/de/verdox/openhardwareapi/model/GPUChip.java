@@ -1,6 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.values.PowerConnector;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -9,7 +9,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -21,6 +20,10 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "GPUChip.All",
+        includeAllAttributes = true
+)
 public class GPUChip extends HardwareSpec<GPUChip> {
 
     @Override
@@ -38,9 +41,11 @@ public class GPUChip extends HardwareSpec<GPUChip> {
     private String canonicalModel;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.PcieVersion pcieVersion = HardwareTypes.PcieVersion.UNKNOWN;
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.VRAM_TYPE vramType = HardwareTypes.VRAM_TYPE.UNKNOWN; // z.B. GDDR6, GDDR6X
 
     @PositiveOrZero
@@ -50,14 +55,11 @@ public class GPUChip extends HardwareSpec<GPUChip> {
     @PositiveOrZero
     private double lengthMm = 0;
 
+    @PositiveOrZero
     private double tdp = 0;
 
-    @JsonIgnore
-    @OneToMany(mappedBy = "chip", fetch = FetchType.EAGER) // optionaler Rückverweis
-    private Set<GPU> gpus = new HashSet<>();
 
-
-    @ElementCollection(fetch = FetchType.EAGER)
+    @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "gpu_power_connectors", joinColumns = @JoinColumn(name = "spec_id"))
     private Set<PowerConnector> powerConnectors = new LinkedHashSet<>();
 
@@ -78,10 +80,9 @@ public class GPUChip extends HardwareSpec<GPUChip> {
                 ", vramGb=" + vramGb +
                 ", lengthMm=" + lengthMm +
                 ", tdp=" + tdp +
-                ", gpus=" + gpus +
                 ", powerConnectors=" + powerConnectors +
                 ", manufacturer='" + manufacturer + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';

@@ -115,25 +115,10 @@ CREATE TABLE hardware_spec
     spec_type    VARCHAR(31) NOT NULL,
     manufacturer VARCHAR(255),
     model        VARCHAR(255),
-    ean          VARCHAR(255),
+    ean          VARCHAR(14),
     mpn          VARCHAR(255),
-    upc          VARCHAR(255),
     launch_date  date,
     CONSTRAINT pk_hardwarespec PRIMARY KEY (id)
-);
-
-CREATE TABLE hardware_spec_attributes
-(
-    spec_id    BIGINT       NOT NULL,
-    attr_value VARCHAR(2000),
-    attr_key   VARCHAR(255) NOT NULL,
-    CONSTRAINT pk_hardware_spec_attributes PRIMARY KEY (spec_id, attr_key)
-);
-
-CREATE TABLE hardware_spec_tags
-(
-    spec_id BIGINT NOT NULL,
-    tag     VARCHAR(255)
 );
 
 CREATE TABLE m2slots
@@ -215,6 +200,18 @@ CREATE TABLE ram
     CONSTRAINT pk_ram PRIMARY KEY (id)
 );
 
+CREATE TABLE remote_sold_item
+(
+    uuid                 UUID           NOT NULL,
+    market_place_domain  VARCHAR(255)   NOT NULL,
+    market_place_item_id VARCHAR(255)   NOT NULL,
+    ean                  VARCHAR(255)   NOT NULL,
+    sell_price           DECIMAL(18, 2) NOT NULL,
+    currency             VARCHAR(255)   NOT NULL,
+    sell_date            date           NOT NULL,
+    CONSTRAINT pk_remotesolditem PRIMARY KEY (uuid)
+);
+
 CREATE TABLE storage
 (
     id                BIGINT       NOT NULL,
@@ -231,6 +228,28 @@ CREATE TABLE usb_port
     version  VARCHAR(255),
     quantity INTEGER
 );
+
+ALTER TABLE pcie_slots
+    ADD CONSTRAINT uc_02ae9cdcb06cfabb8069fb9ba UNIQUE (spec_id, version, lanes);
+
+ALTER TABLE m2slots
+    ADD CONSTRAINT uc_1a446f9ad00e6fb3a20ab4ea1 UNIQUE (spec_id, pcie_version, supported_interface);
+
+ALTER TABLE usb_port
+    ADD CONSTRAINT uc_2fe2159427808b033eacd18de UNIQUE (spec_id, type, version);
+
+ALTER TABLE psu_connectors
+    ADD CONSTRAINT uc_b1f679aa60a92ab41296ea2ac UNIQUE (spec_id, type);
+
+ALTER TABLE hardware_spec
+    ADD CONSTRAINT uc_hardwarespec_ean UNIQUE (ean);
+
+ALTER TABLE remote_sold_item
+    ADD CONSTRAINT ux_rsi_all UNIQUE (market_place_domain, market_place_item_id, ean, sell_price, currency, sell_date);
+
+CREATE INDEX idx_rsi_ean ON remote_sold_item (ean);
+
+CREATE INDEX idx_rsi_ean_sellprice ON remote_sold_item (ean, sell_price);
 
 ALTER TABLE cpucooler
     ADD CONSTRAINT FK_CPUCOOLER_ON_ID FOREIGN KEY (id) REFERENCES hardware_spec (id);
@@ -273,12 +292,6 @@ ALTER TABLE display_sync
 
 ALTER TABLE gpu_power_connectors
     ADD CONSTRAINT fk_gpu_power_connectors_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
-
-ALTER TABLE hardware_spec_attributes
-    ADD CONSTRAINT fk_hardware_spec_attributes_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
-
-ALTER TABLE hardware_spec_tags
-    ADD CONSTRAINT fk_hardware_spec_tags_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
 
 ALTER TABLE m2slots
     ADD CONSTRAINT fk_m2slots_on_motherboard FOREIGN KEY (spec_id) REFERENCES motherboard (id);

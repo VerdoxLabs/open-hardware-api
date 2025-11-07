@@ -72,7 +72,7 @@ public class MindfactoryScrapers {
                         .addMainScrapeLogic((scraped, target) -> {
                                     var specs = scraped.specs();
                                     target.setWattage((int) parseFirstInt("Leistung:", specs));
-                                    target.setSize(extractFirstEnum(HardwareTypes.MotherboardFormFactor.class, "Netzteilformat", specs,
+                                    target.setSize(extractFirstEnum(HardwareTypes.PSUFormFactor.class, "Netzteilformat", specs,
                                             (s, f) -> s.toUpperCase().contains(f.name())));
                                     target.setEfficiencyRating(extractFirstEnum(HardwareTypes.PsuEfficiencyRating.class, "80 Plus Zertifikat:", specs,
                                             (s, r) -> s.toUpperCase().contains(r.name())));
@@ -117,7 +117,18 @@ public class MindfactoryScrapers {
                                     else target.setPcieVersion(HardwareTypes.PcieVersion.GEN3);
                                     target.setVramGb(parseFirstInt("Grösse des Grafikspeichers:", specs));
                                     target.setVramType(extractFirstEnum(HardwareTypes.VRAM_TYPE.class, "Grafikspeichertyp:", specs, (s, t) -> s.contains(t.name())));
-                                },
+
+                                    target.setGpuCanonicalName(
+                                            extractFirstString("GPU Modell:", specs)
+                                                    .replace("NVIDIA", "")
+                                                    .replace("GeForce", "")
+                                                    .replace("AMD", "")
+                                                    .replace("Radeon", "")
+                                                    .replace("Intel ", "")
+                                                    .trim()
+                                    );
+
+                                    },
                                 "https://www.mindfactory.de/Hardware/Grafikkarten+(VGA)/GeForce+RTX+fuer+Gaming.html",
                                 "https://www.mindfactory.de/Hardware/Grafikkarten+(VGA)/GeForce+GT+fuer+Multimedia.html",
                                 "https://www.mindfactory.de/Hardware/Grafikkarten+(VGA)/Radeon+RX+Serie.html",

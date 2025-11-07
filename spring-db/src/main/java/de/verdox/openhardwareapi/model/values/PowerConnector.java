@@ -9,6 +9,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.Positive;
 import lombok.*;
 
+import java.util.Objects;
+
 @Embeddable
 @Getter
 @Setter
@@ -23,4 +25,16 @@ public class PowerConnector {
 
     @Positive
     private Integer quantity;
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        PowerConnector that = (PowerConnector) o;
+        return type == that.type;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(type);
+    }
 }

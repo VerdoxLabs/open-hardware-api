@@ -1,5 +1,6 @@
 package de.verdox.openhardwareapi.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import de.verdox.openhardwareapi.model.values.DimensionsMm;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -17,6 +18,10 @@ import java.util.Set;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@NamedEntityGraph(
+        name = "PCCase.All",
+        includeAllAttributes = true
+)
 public class PCCase extends HardwareSpec<PCCase> {
 
     @Override
@@ -30,6 +35,7 @@ public class PCCase extends HardwareSpec<PCCase> {
     }
 
     @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private HardwareTypes.CaseSizeClass sizeClass = HardwareTypes.CaseSizeClass.MID_TOWER;
 
 
@@ -37,7 +43,7 @@ public class PCCase extends HardwareSpec<PCCase> {
     private DimensionsMm dimensions = new DimensionsMm(0d, 0d, 0d);
 
 
-    @ElementCollection(fetch = FetchType.EAGER)
+    @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "mb_case_support", joinColumns = @JoinColumn(name = "spec_id"))
     @Enumerated(EnumType.STRING)
     @Column(name = "form_factor")
@@ -74,7 +80,7 @@ public class PCCase extends HardwareSpec<PCCase> {
     @Override
     public String toString() {
         return "PCCase{" +
-                "EAN='" + EAN + '\'' +
+                "EAN='" + EANs + '\'' +
                 ", sizeClass=" + sizeClass +
                 ", dimensions=" + dimensions +
                 ", motherboardSupport=" + motherboardSupport +
@@ -85,5 +91,9 @@ public class PCCase extends HardwareSpec<PCCase> {
                 ", MPN='" + MPN + '\'' +
                 ", launchDate=" + launchDate +
                 '}';
+    }
+
+    public boolean isCompatibleWith(GPU gpu) {
+        return maxGpuLengthMm <= gpu.getLengthMm();
     }
 }

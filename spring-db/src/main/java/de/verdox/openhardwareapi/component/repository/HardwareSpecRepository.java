@@ -21,7 +21,7 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     interface HardwareLightView {
         long getId();
         String getDiscriminator(); // z.B. via @DiscriminatorValue oder getClass().getName() per native query
-        String getEAN();
+        List<String> getEANs();
         String getMPN();
     }
 
@@ -29,10 +29,16 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     boolean existsByModelIgnoreCase(String model);
     boolean existsByModelIgnoreCaseAndIdNot(String model, Long id);
 
-    Optional<HardwareSpec<?>> findByEANIgnoreCase(String ean);
+    @Query("""
+           select h
+           from #{#entityName} h
+           join h.EANs e
+           where e = :ean
+           """)
+    Optional<HardwareSpec<?>> findByEan(@Param("ean") String ean);
+
     Optional<HardwareSpec<?>> findByMPNIgnoreCase(String mpn);
 
-    // Rohwerte (Groß-/Kleinschreibung wie gespeichert)
     @Query("""
            select distinct h.manufacturer
            from HardwareSpec h
@@ -40,7 +46,6 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
            """)
     Set<String> findAllManufacturers();
 
-    // Normalisiert (case-insensitiv, getrimmt) – liefert z.B. "asus", "msi", ...
     @Query("""
            select distinct lower(trim(h.manufacturer))
            from HardwareSpec h
@@ -48,7 +53,6 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
            """)
     Set<String> findAllManufacturersNormalized();
 
-    // Optional: sortiert für UI (dann List statt Set)
     @Query("""
            select distinct lower(trim(h.manufacturer))
            from HardwareSpec h
@@ -63,7 +67,7 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     @Query("""
        select h.id as id,
               type(h) as discriminator,
-              upper(h.EAN) as EAN,
+              upper(h.EANs) as EANs,
               upper(h.MPN) as MPN
        from HardwareSpec h
     """)

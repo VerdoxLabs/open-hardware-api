@@ -14,6 +14,10 @@ import lombok.Setter;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@NamedEntityGraph(
+        name = "CPU.All",
+        includeAllAttributes = true
+)
 public class CPU extends HardwareSpec<CPU> {
 
     @Override
@@ -89,7 +93,7 @@ public class CPU extends HardwareSpec<CPU> {
                 ", tdpWatts=" + tdpWatts +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
-                ", EAN='" + EAN + '\'' +
+                ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPN + '\'' +
                 ", socket=" + socket +
                 ", integratedGraphics='" + integratedGraphics + '\'' +
@@ -107,5 +111,9 @@ public class CPU extends HardwareSpec<CPU> {
     @Override
     public void checkIfLegal() {
 
+    }
+
+    public boolean isCompatibleWith(Motherboard motherboard) {
+        return motherboard.getSocket().equals(this.socket);
     }
 }

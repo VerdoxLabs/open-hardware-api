@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 
 @Service
 @RequiredArgsConstructor
-public class SynchronizationService {
+public class HardwareSyncService {
 
     private static final Logger LOGGER = ScrapingService.LOGGER;
 
@@ -36,8 +36,7 @@ public class SynchronizationService {
     /**
      * Double-Buffer: aktiver Sammel-Puffer (Key -> HardwareSpec)
      */
-    private final AtomicReference<ConcurrentMap<String, HardwareSpec<?>>> activeBuffer =
-            new AtomicReference<>(new ConcurrentHashMap<>());
+    private final AtomicReference<ConcurrentMap<String, HardwareSpec<?>>> activeBuffer = new AtomicReference<>(new ConcurrentHashMap<>());
 
     /**
      * Worker-Executor für Sync (Single-Thread, bewahrt Reihenfolge)
@@ -98,10 +97,10 @@ public class SynchronizationService {
         }
         Class<HARDWARE> clazz = (Class<HARDWARE>) hardwareSpec.getClass();
         String type = hardwareSpecService.getTypeAsString(clazz);
-        LOGGER.log(Level.INFO, "Syncing {0} to remote nodes", hardwareSpec.getEAN());
+        LOGGER.log(Level.INFO, "Syncing {0} to remote nodes", hardwareSpec.getEANs());
         for (HardwareSpecClient client : clients) {
             try {
-                client.uploadOne(type, hardwareSpec, clazz);
+                client.uploadHardwareOne(type, hardwareSpec, clazz);
             } catch (Throwable ex) {
                 LOGGER.log(Level.WARNING,
                         String.format("Sync to %s failed for %s %s: %s",
@@ -160,12 +159,10 @@ public class SynchronizationService {
     private void flushBuffer(ConcurrentMap<String, HardwareSpec<?>> batch) {
         long start = System.currentTimeMillis();
         int total = batch.size();
-        LOGGER.log(Level.INFO, "Flushing {0} specs (bulk) to {1} clients ...",
-                new Object[]{total, clients.size()});
+        LOGGER.log(Level.FINE, "Flushing {0} specs (bulk) to {1} clients ...", new Object[]{total, clients.size()});
 
         List<HardwareSpec<?>> all = new ArrayList<>(batch.values());
         Map<String, List<HardwareSpec<?>>> byType = new HashMap<>();
-
 
 
         for (HardwareSpec<?> spec : all) {
@@ -183,20 +180,23 @@ public class SynchronizationService {
 
                 for (List<HardwareSpec<?>> chunk : partition(specsOfType, bulkMaxBatchSize)) {
                     for (HardwareSpec<?> hardwareSpec : chunk) {
+                        if (hardwareSpec.getMPN() == null || hardwareSpec.getMPN().isBlank()) {
+                            continue;
+                        }
                         Class<HardwareSpec<?>> clazz = (Class<HardwareSpec<?>>) hardwareSpec.getClass();
                         try {
-                            client.uploadOne(type, hardwareSpec, clazz);
+                            client.uploadHardwareOne(type, hardwareSpec, clazz);
                             counter++;
                         } catch (Throwable ex) {
                             LOGGER.log(Level.SEVERE, String.format(
                                     "Upload failed @ EAN=%s model=%s",
-                                    hardwareSpec.getEAN(), hardwareSpec.getModel()), ex);
+                                    hardwareSpec.getEANs(), hardwareSpec.getModel()), ex.getCause().getMessage());
                             break A;
                         }
                     }
                 }
             }
-            LOGGER.log(Level.INFO, "Synced " + counter + " to " + client.getUrlApiV1());
+            LOGGER.log(Level.FINE, "\tSynced " + counter + " hardware entities to " + client.getUrlApiV1());
         }
 
         long dur = System.currentTimeMillis() - start;
@@ -275,17 +275,17 @@ public class SynchronizationService {
     @SuppressWarnings("unchecked")
     private <H extends HardwareSpec<H>> void uploadOneUnchecked(HardwareSpecClient client, String type, HardwareSpec<?> spec) throws Throwable {
         Class<H> clazz = (Class<H>) spec.getClass();
-        client.uploadOne(type, (H) spec, clazz);
+        client.uploadHardwareOne(type, (H) spec, clazz);
     }
 
     private String buildKey(String type, HardwareSpec<?> spec) {
-        String id = firstNonBlank(spec.getEAN(), spec.getMPN(),
+        String id = firstNonBlank(spec.getMPN(),
                 Integer.toHexString(System.identityHashCode(spec)));
         return type + "|" + id.trim().toLowerCase(Locale.ROOT);
     }
 
     private String safeKeyOf(HardwareSpec<?> spec) {
-        return firstNonBlank(spec.getEAN(), spec.getMPN(), "?");
+        return firstNonBlank(spec.getMPN(), "?");
     }
 
     private static String firstNonBlank(String... s) {

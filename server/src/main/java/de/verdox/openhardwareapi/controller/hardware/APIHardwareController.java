@@ -1,11 +1,13 @@
-package de.verdox.openhardwareapi.controller;
+package de.verdox.openhardwareapi.controller.hardware;
 
+import de.verdox.openhardwareapi.component.repository.HardwareSpecificRepo;
 import de.verdox.openhardwareapi.component.service.HardwareSpecService;
 import de.verdox.openhardwareapi.model.HardwareSpec;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.web.PageableDefault;
@@ -61,7 +63,7 @@ public class APIHardwareController {
 
     @GetMapping("/{type}")
     @Transactional(readOnly = true)
-    public <HARDWARE extends HardwareSpec> ResponseEntity<Page<HardwareSpec>> list(
+    public <HARDWARE extends HardwareSpec<HARDWARE>> ResponseEntity<Page<HARDWARE>> list(
             @PathVariable String type,
             @PageableDefault(size = 50, sort = "id", direction = Sort.Direction.ASC) Pageable pageable,
             WebRequest request
@@ -70,27 +72,35 @@ public class APIHardwareController {
             throw new IllegalArgumentException("Invalid type:" + type);
         }
         Class<HARDWARE> hardwareType = (Class<HARDWARE>) hardwareSpecService.getType(type);
-        JpaSpecificationExecutor<HARDWARE> repo = hardwareSpecService.getRepo(hardwareType);
+        HardwareSpecificRepo<HARDWARE> repo = hardwareSpecService.getRepo(hardwareType);
         if (repo == null) {
             throw new IllegalStateException("No repo found for type: " + type);
         }
 
-        Page<HardwareSpec> page = repo.findAll(null, pageable).map(e -> e);
+        Page<HARDWARE> page = hardwareSpecService.findPage(hardwareType, pageable);
 
-        String etag = "\"" + page.getTotalElements() + ":" +
-                page.getContent().stream()
-                        .map(HardwareSpec::getLaunchDate)
-                        .filter(Objects::nonNull)
-                        .max(Comparator.naturalOrder())
-                        .orElse(LocalDate.now());
+        String lastLaunch = page.getContent().stream()
+                .map(HardwareSpec::getLaunchDate)
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
+                .orElse(LocalDate.MIN) // stabiler Default
+                .toString();
 
-        if (request.checkNotModified(etag))
-            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).build();
+        // ETag stabil halten: Größe + letzte LaunchDate
+        String etag = "\"" + page.getTotalElements() + ":" + lastLaunch + "\"";
+
+        if (request.checkNotModified(etag)) {
+            // 304 + ETag zurückgeben
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+                    .eTag(etag)
+                    .cacheControl(CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic())
+                    .build();
+        }
 
         return ResponseEntity.ok()
+                .eTag(etag)
                 .cacheControl(CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic())
                 .body(page);
-
     }
 
     @GetMapping("/byEan/{ean}/{type}")
