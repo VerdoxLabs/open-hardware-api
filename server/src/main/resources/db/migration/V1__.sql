@@ -62,7 +62,7 @@ CREATE TABLE display
     display_ports       INTEGER,
     dvi_ports           INTEGER,
     vga_ports           INTEGER,
-    response_timems     INTEGER,
+    response_timems     DOUBLE PRECISION,
     inch_size           DOUBLE PRECISION,
     res_width           INTEGER,
     res_height          INTEGER,
@@ -80,13 +80,14 @@ CREATE TABLE display_sync
 
 CREATE TABLE gpu
 (
-    id           BIGINT           NOT NULL,
-    length_mm    DOUBLE PRECISION NOT NULL,
-    gpu_chip_id  BIGINT,
-    pcie_version VARCHAR(255),
-    vram_type    VARCHAR(255),
-    vram_gb      DOUBLE PRECISION NOT NULL,
-    tdp          DOUBLE PRECISION NOT NULL,
+    id                 BIGINT           NOT NULL,
+    gpu_canonical_name VARCHAR(255)     NOT NULL,
+    length_mm          DOUBLE PRECISION NOT NULL,
+    gpu_chip_id        BIGINT,
+    pcie_version       VARCHAR(255),
+    vram_type          VARCHAR(255),
+    vram_gb            DOUBLE PRECISION NOT NULL,
+    tdp                DOUBLE PRECISION NOT NULL,
     CONSTRAINT pk_gpu PRIMARY KEY (id)
 );
 
@@ -115,10 +116,20 @@ CREATE TABLE hardware_spec
     spec_type    VARCHAR(31) NOT NULL,
     manufacturer VARCHAR(255),
     model        VARCHAR(255),
-    ean          VARCHAR(14),
-    mpn          VARCHAR(255),
     launch_date  date,
     CONSTRAINT pk_hardwarespec PRIMARY KEY (id)
+);
+
+CREATE TABLE hardware_spec_eans
+(
+    spec_id BIGINT      NOT NULL,
+    ean     VARCHAR(14) NOT NULL
+);
+
+CREATE TABLE hardware_spec_mpns
+(
+    spec_id BIGINT NOT NULL,
+    mpn     VARCHAR(255)
 );
 
 CREATE TABLE m2slots
@@ -176,6 +187,7 @@ CREATE TABLE psu
     efficiency_rating VARCHAR(255),
     modularity        VARCHAR(255),
     size              VARCHAR(255),
+    psu_power_version FLOAT,
     CONSTRAINT pk_psu PRIMARY KEY (id)
 );
 
@@ -190,6 +202,7 @@ CREATE TABLE ram
 (
     id                                  BIGINT       NOT NULL,
     type                                VARCHAR(255) NOT NULL,
+    form_factor                                VARCHAR(255) NOT NULL,
     sticks                              INTEGER      NOT NULL,
     size_gb                             INTEGER      NOT NULL,
     speed_mtps                          INTEGER,
@@ -197,6 +210,8 @@ CREATE TABLE ram
     row_address_to_column_address_delay INTEGER,
     row_precharge_time                  INTEGER,
     row_active_time                     INTEGER,
+    is_ecc                              BOOLEAN      NOT NULL,
+    has_heat_spreader                              BOOLEAN      NOT NULL,
     CONSTRAINT pk_ram PRIMARY KEY (id)
 );
 
@@ -240,9 +255,6 @@ ALTER TABLE usb_port
 
 ALTER TABLE psu_connectors
     ADD CONSTRAINT uc_b1f679aa60a92ab41296ea2ac UNIQUE (spec_id, type);
-
-ALTER TABLE hardware_spec
-    ADD CONSTRAINT uc_hardwarespec_ean UNIQUE (ean);
 
 ALTER TABLE remote_sold_item
     ADD CONSTRAINT ux_rsi_all UNIQUE (market_place_domain, market_place_item_id, ean, sell_price, currency, sell_date);
@@ -293,6 +305,16 @@ ALTER TABLE display_sync
 ALTER TABLE gpu_power_connectors
     ADD CONSTRAINT fk_gpu_power_connectors_on_g_p_u_chip FOREIGN KEY (spec_id) REFERENCES gpuchip (id);
 
+ALTER TABLE hardware_spec_eans
+    ADD CONSTRAINT fk_hardware_spec_eans_on_hardware_spec FOREIGN KEY (spec_id) REFERENCES hardware_spec (id) ON DELETE CASCADE;
+
+ALTER TABLE hardware_spec_mpns
+    ADD CONSTRAINT fk_hardware_spec_mpns_on_hardware_spec FOREIGN KEY (spec_id) REFERENCES hardware_spec (id) ON DELETE CASCADE;
+
+ALTER TABLE hardware_spec_eans ADD CONSTRAINT uc_ean UNIQUE (ean);
+
+ALTER TABLE hardware_spec_mpns ADD CONSTRAINT uc_mpn UNIQUE (mpn);
+
 ALTER TABLE m2slots
     ADD CONSTRAINT fk_m2slots_on_motherboard FOREIGN KEY (spec_id) REFERENCES motherboard (id);
 
@@ -307,3 +329,8 @@ ALTER TABLE psu_connectors
 
 ALTER TABLE usb_port
     ADD CONSTRAINT fk_usbport_on_motherboard FOREIGN KEY (spec_id) REFERENCES motherboard (id);
+
+CREATE INDEX IF NOT EXISTS idx_hardware_spec_eans_ean ON hardware_spec_eans (ean);
+
+CREATE INDEX IF NOT EXISTS idx_hardware_spec_mpns_mpn ON hardware_spec_mpns (mpn);
+

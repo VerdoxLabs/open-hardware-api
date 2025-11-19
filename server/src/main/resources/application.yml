@@ -23,3 +23,7 @@ sync:
     max-batch-size: 200
 
 spring.jpa.properties.hibernate.default_batch_fetch_size: 64
+
+spring.jpa.properties.hibernate.jdbc.batch_size: 50
+spring.jpa.properties.hibernate.order_inserts: true
+spring.jpa.properties.hibernate.order_updates: true

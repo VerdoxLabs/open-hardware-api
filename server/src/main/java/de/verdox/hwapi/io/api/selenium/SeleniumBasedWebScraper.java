@@ -1,0 +1,445 @@
+package de.verdox.hwapi.io.api.selenium;
+
+import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
+import de.verdox.hwapi.io.api.BasicWebScraper;
+import de.verdox.hwapi.util.SeleniumUtil;
+import jakarta.annotation.PreDestroy;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.function.BiPredicate;
+import java.util.logging.Level;
+
+/**
+ * Selenium-basierter Scraper mit ID-Ebene:
+ * /data/pages/&lt;domain&gt;/&lt;id&gt;/&lt;hash&gt;.html
+ * <p>
+ * ID ist Pflicht und darf nie null/leer sein.
+ * Dateiname ist Hash der kanonisierten URL (keine täglichen Re-Scrapes notwendig).
+ */
+@Slf4j
+public class SeleniumBasedWebScraper implements BasicWebScraper {
+    /**
+     * Ein globaler (geteilter) Treiber – bei Bedarf kannst du das auf einen Pool umstellen.
+     */
+    @Setter
+    @Getter
+    private WebDriver webDriver;
+
+    private final String id;
+    private final ScrapingCache cache;
+    private final CookieJar cookieJar;
+
+    /**
+     * Erkennung von Bot-/Challenge-Seiten (z. B. Cloudflare), (url, doc) -> true wenn Challenge.
+     */
+    @Setter
+    private BiPredicate<String, Document> isChallengePage;
+    /**
+     * Steuerung, ob eine Seite persistiert werden soll, (url, doc) -> true = speichern.
+     */
+    @Setter
+    private BiPredicate<String, Document> shouldSavePage;
+
+    public SeleniumBasedWebScraper(String id, ScrapingCache cache,
+                                   CookieJar cookieJar,
+                                   BiPredicate<String, Document> isChallengePage,
+                                   BiPredicate<String, Document> shouldSavePage) {
+        this.id = id;
+        this.cache = Objects.requireNonNull(cache, "cache");
+        this.cookieJar = Objects.requireNonNull(cookieJar, "cookieJar");
+        this.isChallengePage = isChallengePage;
+        this.shouldSavePage = shouldSavePage;
+    }
+
+    public SeleniumBasedWebScraper(String id, ScrapingCache cache,
+                                   CookieJar cookieJar) {
+        this(id, cache, cookieJar, (a, b) -> false, (a, b) -> true);
+    }
+
+
+    public Document fetch(String domain, String id, String url, Duration ttl) throws MalformedURLException, ChallengeFoundException {
+        return fetch(domain, id, url, new FetchOptions().setTtl(ttl));
+    }
+
+    public String getPathInCache(String domain, String url) {
+        PageKey key = new PageKey(domain, id, url);
+        return ScrapingPaths.fileFor(key).toAbsolutePath().toString();
+    }
+
+    /**
+     * Haupteinstieg: Seite unter einer festen ID-Gruppe fetchen.
+     *
+     * @param domain z. B. "mindfactory.de"
+     * @param id     Gruppierungs-ID (niemals null/leer)
+     * @param url    Ziel-URL
+     * @param fetchOptions Fetch options
+     */
+    public Document fetch(String domain, String id, String url, FetchOptions fetchOptions) throws MalformedURLException, ChallengeFoundException {
+        validateDomain(domain);
+        validateId(id);
+        String canonUrl = ScrapingPaths.urlCanonical(url);
+        PageKey key = new PageKey(domain, id, canonUrl);
+
+        // 1) Cache prüfen (TTL)
+        Optional<String> cached = cache.loadHtml(key).flatMap(html -> isFreshEnough(key, fetchOptions.getTtl()) ? Optional.of(html) : Optional.empty());
+
+        if (cached.isPresent()) {
+            Document cachedDocument = Jsoup.parse(cached.get(), baseUri(domain));
+
+            if (isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument)) {
+                ScrapingService.LOGGER.log(Level.FINE, "Removing cached challenge page: " + canonUrl);
+                deleteCached(key);
+            } else if (shouldSavePage == null || !shouldSavePage.test(canonUrl, cachedDocument)) {
+                ScrapingService.LOGGER.log(Level.FINE, "Removing page that should not be saved : " + canonUrl);
+                deleteCached(key);
+            } else {
+                return cachedDocument;
+            }
+        }
+
+        if (fetchOptions.isSkipIfNotCache()) {
+            ScrapingService.LOGGER.log(Level.INFO, "Creating shell : " + canonUrl);
+            return Document.createShell(url);
+        }
+
+        // 2) Live laden via Selenium
+
+
+        Document doc;
+        String html;
+        if (fetchOptions.isTryHeadlessFirst()) {
+            try {
+                ScrapingService.LOGGER.log(Level.FINE, "Cache miss → Headless fetch: " + canonUrl + " [" + domain + ":" + id + "]");
+                doc = fetchHeadless(canonUrl);
+                html = doc.html();
+            } catch (IOException e) {
+                return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
+            }
+        } else {
+            ScrapingService.LOGGER.log(Level.FINE, "Cache miss → Selenium fetch: " + canonUrl + " [" + domain + ":" + id + "]");
+            html = fetchWithSelenium(canonUrl, fetchOptions);
+            html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+
+            doc = Jsoup.parse(html, baseUri(domain));
+        }
+
+
+        if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
+            ScrapingService.LOGGER.log(Level.FINE, "Challenge page detected for URL: " + canonUrl);
+            try {
+
+                if(fetchOptions.isTryHeadlessFirst()) {
+                    return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
+                }
+
+                Thread.sleep(1000);
+                HtmlSlimmer.slimHtml(webDriver.getPageSource(), canonUrl, new HtmlSlimmer.Options());
+            } catch (InterruptedException ignored) {
+            }
+        }
+
+        if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
+            ScrapingService.LOGGER.log(Level.FINE, "Challenge page detected for URL: " + canonUrl);
+
+            if(fetchOptions.isTryHeadlessFirst()) {
+                return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
+            }
+
+            deleteCached(key);
+            throw new ChallengeFoundException();
+        }
+
+        if (shouldSavePage == null || shouldSavePage.test(canonUrl, doc)) {
+            try {
+                cache.saveHtml(key, html);
+            } catch (UncheckedIOException e) {
+                ScrapingService.LOGGER.log(Level.SEVERE, "Failed to persist HTML for: " + canonUrl + " [" + domain + ":" + id + "]", e);
+            }
+        } else {
+            deleteCached(key);
+        }
+
+        return doc;
+    }
+
+
+    /* ---------------------------------------------------------
+       Driver-Handling
+       --------------------------------------------------------- */
+
+    private Document fetchHeadless(String url) throws IOException {
+        return Jsoup.connect(url)
+                .userAgent("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36")
+                .timeout(10_000)
+                .get();
+    }
+
+    private String fetchWithSelenium(String url, FetchOptions fetchOptions) throws MalformedURLException {
+        ensureDriver();
+        tryRestoreCookies(url);
+
+        WebDriverWait wait = new WebDriverWait(webDriver, Duration.ofSeconds(10));
+
+        try {
+            webDriver.get(url);
+        } catch (org.openqa.selenium.NoSuchSessionException ex) {
+            // Session war tot – neu aufsetzen und einmal wiederholen
+            restartDriver();
+            webDriver.get(url);
+        }
+        try {
+            fetchOptions.getBeforeSaveOperation().beforeSave(webDriver);
+        }
+        catch (Throwable ex) {
+            ex.printStackTrace();
+        }
+        wait.until(driver -> {
+            try {
+                return ((JavascriptExecutor)driver).executeScript("return jQuery.active === 0;");
+            }
+            catch (Exception ignored) {
+                return new Object();
+            }
+        });
+        String html = webDriver.getPageSource();
+        tryStoreCookies(url);
+        return html;
+    }
+
+    // Neu: zentraler Options-Builder (damit restart/ensure gleich sind)
+    private ChromeOptions buildChromeOptions() {
+        ChromeOptions options = new ChromeOptions();
+        options.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
+        options.setExperimentalOption("useAutomationExtension", false);
+        options.addArguments(
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1920,1080",
+                "--lang=de-DE",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+        );
+        return options;
+    }
+
+    // Neu: Session-Alive-Check
+    private static boolean isSessionAlive(WebDriver d) {
+        if (d == null) return false;
+        try {
+            if (d instanceof org.openqa.selenium.remote.RemoteWebDriver rwd) {
+                return rwd.getSessionId() != null;
+            }
+            // Fallback-Heuristik: ein harmloser Befehl
+            d.getTitle(); // kann NoSuchSessionException werfen
+            return true;
+        } catch (org.openqa.selenium.NoSuchSessionException ex) {
+            return false;
+        } catch (Throwable t) {
+            // andere Fehler nicht als "tot" interpretieren
+            return true;
+        }
+    }
+
+    public synchronized WebDriver ensureDriver() throws MalformedURLException {
+        if (!isSessionAlive(webDriver)) {
+            // Altes Objekt ggf. entsorgen
+            try {
+                if (webDriver != null) webDriver.quit();
+            } catch (Exception ignore) {
+            }
+            webDriver = null;
+            // Auch Registry säubern, falls dort noch ein altes Objekt lag
+            try {
+                SeleniumUtil.cleanup(id);
+            } catch (Exception ignore) {
+            }
+            // Frischen Driver anlegen
+            webDriver = SeleniumUtil.create(id, buildChromeOptions());
+            if (log.isInfoEnabled()) {
+                if (webDriver instanceof RemoteWebDriver rwd) {
+                    log.info("Initialized WebDriver: {}", rwd.getCapabilities());
+                } else {
+                    log.info("Initialized WebDriver: {}", webDriver);
+                }
+            }
+        }
+        return webDriver;
+    }
+
+    public synchronized void restartDriver() throws MalformedURLException {
+        ScrapingService.LOGGER.log(Level.INFO, "Restarting WebDriver for id={0}", id);
+        try {
+            if (webDriver != null) webDriver.quit();
+        } catch (Exception ignore) {
+        }
+        webDriver = null;
+        try {
+            SeleniumUtil.cleanup(id);
+        } catch (Exception ignore) {
+        }
+        webDriver = SeleniumUtil.create(id, buildChromeOptions());
+        if (log.isInfoEnabled()) {
+            if (webDriver instanceof RemoteWebDriver rwd) {
+                log.info("Reinitialized WebDriver: {}", rwd.getCapabilities());
+            } else {
+                log.info("Reinitialized WebDriver: {}", webDriver);
+            }
+        }
+    }
+
+    @PreDestroy
+    public void destroy() {
+        cleanup();
+    }
+
+    public static void cleanup() {
+        SeleniumUtil.cleanUp();
+    }
+
+    /* ---------------------------------------------------------
+       Cookies
+       --------------------------------------------------------- */
+
+    private void tryRestoreCookies(String url) {
+        if (cookieJar == null) return;
+        String domain = domainFromUrl(url);
+        try {
+            //cookieJar.applyTo(webDriver, domain);
+        } catch (Exception e) {
+            log.debug("Cookie restore failed for domain {}", domain, e);
+        }
+    }
+
+    private void tryStoreCookies(String url) {
+        if (cookieJar == null) return;
+        String domain = domainFromUrl(url);
+        try {
+            //cookieJar.captureFrom(webDriver, domain);
+        } catch (Exception e) {
+            log.debug("Cookie capture failed for domain {}", domain, e);
+        }
+    }
+
+    private static String domainFromUrl(String url) {
+        try {
+            URI u = new URI(url);
+            return u.getHost() != null ? u.getHost() : url;
+        } catch (URISyntaxException e) {
+            return url;
+        }
+    }
+
+    /* ---------------------------------------------------------
+       Helpers / Policies
+       --------------------------------------------------------- */
+
+    /**
+     * Einfache TTL-Policy:
+     * - null oder Duration.ZERO → immer frisch
+     * - ansonsten: hier könntest du z. B. File-Zeitstempel im Cache prüfen.
+     * Da {@link ScrapingCache} abstrakt ist, wird standardmäßig "true" geliefert.
+     */
+    /**
+     * TTL-Policy:
+     * - null, ZERO oder negativ ⇒ Cache gilt immer als frisch (kein Re-Fetch).
+     * - sonst: prüfe mtime der Cache-Datei gegen now()-ttl.
+     */
+    private boolean isFreshEnough(PageKey key, Duration ttl) {
+        if (ttl == null || ttl.isZero() || ttl.isNegative()) return true;
+        try {
+            Path file = fileFor(key);
+            if (!Files.exists(file)) return false;
+            FileTime lastModified = Files.getLastModifiedTime(file);
+            Instant cutoff = Instant.now().minus(ttl);
+            return lastModified.toInstant().isAfter(cutoff);
+        } catch (Exception e) {
+            // Defensive: bei Fehler lieber als „nicht frisch“ behandeln → neu laden
+            return false;
+        }
+    }
+
+    /**
+     * Pfad der Cache-Datei (zentral, falls sich die Logik in ScrapingPaths mal ändert).
+     */
+    private static Path fileFor(PageKey key) {
+        return ScrapingPaths.fileFor(key.domain(), key.id(), key.url());
+    }
+
+    /**
+     * Alte/ungültige Cache-Datei entfernen (ohne harte Fehler).
+     */
+    private void deleteCached(PageKey key) {
+        try {
+            Files.deleteIfExists(fileFor(key));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String baseUri(String domain) {
+        return "https://" + domain + "/";
+    }
+
+    private static void validateDomain(String domain) {
+        if (domain == null || domain.isBlank())
+            throw new IllegalArgumentException("domain must not be null/blank");
+        if (domain.contains("/") || domain.contains(".."))
+            throw new IllegalArgumentException("invalid domain path segment: " + domain);
+    }
+
+    private static void validateId(String id) {
+        if (id == null) throw new IllegalArgumentException("id must not be null");
+        if (id.trim().isEmpty()) throw new IllegalArgumentException("id must not be empty");
+    }
+
+    @Override
+    public Document scrape(String url) {
+        return null;
+    }
+
+    public static class ChallengeFoundException extends IOException {
+        public ChallengeFoundException() {
+        }
+
+        public ChallengeFoundException(String message) {
+            super(message);
+        }
+
+        public ChallengeFoundException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        public ChallengeFoundException(Throwable cause) {
+            super(cause);
+        }
+    }
+}
