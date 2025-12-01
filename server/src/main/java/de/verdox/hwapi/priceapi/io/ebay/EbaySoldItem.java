@@ -1,6 +1,7 @@
 package de.verdox.hwapi.priceapi.io.ebay;
 
 import de.verdox.hwapi.io.api.Price;
+import de.verdox.hwapi.model.values.ItemCondition;
 
 import java.time.LocalDate;
 import java.util.List;

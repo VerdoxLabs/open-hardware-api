@@ -4,10 +4,7 @@ import de.verdox.hwapi.model.HardwareSpec;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -35,13 +32,13 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     boolean existsByModelIgnoreCaseAndIdNot(String model, Long id);
 
     @Query("""
-    select distinct h
-    from #{#entityName} h
-    left join h.EANs e
-    left join h.MPNs m
-    where ( :hasEans = true and e in :allEans )
-       or ( :hasMpns = true and m in :allMpns )
-    """)
+            select distinct h
+            from #{#entityName} h
+            left join h.EANs e
+            left join h.MPNs m
+            where ( :hasEans = true and e in :allEans )
+               or ( :hasMpns = true and m in :allMpns )
+            """)
     List<HardwareSpec<?>> findAllByAnyEanOrMpnIn(
             @Param("allEans") Collection<String> allEans,
             @Param("allMpns") Collection<String> allMpns,
@@ -79,13 +76,25 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     Optional<HardwareSpec<?>> findByMPN(@Param("mpn") String mpn);
 
     @Query("""
-       select h
-       from #{#entityName} h
-       left join h.EANs e
-       left join h.MPNs m
-       where e = :input or m = :input
-       """)
+            select distinct h
+            from HardwareSpec h
+            left join fetch h.EANs e
+            left join fetch h.MPNs m
+            where e = :input or m = :input
+            """)
     Optional<HardwareSpec<?>> findByEanOrMpn(@Param("input") String input);
+
+    @Query("""
+            select distinct h
+            from HardwareSpec h
+            left join h.EANs e
+            left join h.MPNs m
+            where e in :inputs or m in :inputs
+            """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
+    List<HardwareSpec<?>> findAllByEanOrMpn(@Param("inputs") Collection<String> inputs);
 
     @Query("""
             select distinct h.manufacturer

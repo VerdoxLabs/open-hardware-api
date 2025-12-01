@@ -172,6 +172,16 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     }
 
     @Transactional(readOnly = true)
+    public List<HardwareSpec<?>> findAllByEANOrMPN(List<String> decodedKeys) {
+        return baseRepo.findAllByEanOrMpn(decodedKeys);
+    }
+
+    @Transactional(readOnly = true)
+    public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findById(long id) {
+        return (HARDWARE) baseRepo.findById(id).orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByMPN(Class<HARDWARE> clazz, String MPN) {
         Optional<HARDWARE> found = getRepo(clazz).findByMPN(MPN);
         return found.orElse(null);
@@ -577,4 +587,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
         LOGGER.info("\tTook " + (System.currentTimeMillis() - start) + " ms");
     }
+
+
 }

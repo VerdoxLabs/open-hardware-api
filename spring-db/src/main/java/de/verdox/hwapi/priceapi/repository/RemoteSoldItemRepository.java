@@ -1,5 +1,6 @@
 package de.verdox.hwapi.priceapi.repository;
 
+import de.verdox.hwapi.model.values.ItemCondition;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
 import de.verdox.hwapi.model.values.Currency;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,12 +9,9 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
-public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, UUID> {
+import java.util.*;
 
+public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, UUID> {
     interface PricePoint {
         LocalDate getSellDate();   // = r.sellDate
         BigDecimal getPrice();     // = r.price
@@ -27,7 +25,40 @@ public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, 
         Currency getCurrency();      // = r.currency
     }
 
-    // --- Preis-Zeitreihen ----------------------------------------------------
+    /**
+     * Interne Query mit berechnetem fromDate (ab diesem Datum).
+     */
+    @Query("""
+        SELECT r
+        FROM RemoteSoldItem r
+        WHERE (r.ean IN :eans OR r.ean IN :mpns)
+          AND r.condition IN :conditions
+          AND r.sellDate >= :fromDate
+        """)
+    List<RemoteSoldItem> findPricePointsInternal(
+            @Param("mpns") Set<String> mpns,
+            @Param("eans") Set<String> eans,
+            @Param("conditions") Set<ItemCondition> conditions,
+            @Param("fromDate") LocalDate fromDate
+    );
+
+    /**
+     * Öffentliche Methode mit monthSince wie von dir vorgegeben.
+     * monthSince = Anzahl Monate rückwärts ab heute.
+     */
+    default List<RemoteSoldItem> findPricePoints(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince
+    ) {
+        if (conditions == null || conditions.isEmpty()) {
+            throw new IllegalArgumentException("conditions must not be null or empty");
+        }
+
+        LocalDate fromDate = LocalDate.now().minusMonths(monthSince);
+        return findPricePointsInternal(mpns, eans, conditions, fromDate);
+    }
 
     @Query("""
         select r.sellDate as sellDate, r.sellPrice as price, r.currency as currency
@@ -45,8 +76,6 @@ public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, 
         """)
     List<PricePoint> findPriceSeriesByEanSince(@Param("ean") String ean,
                                                @Param("from") LocalDate from);
-
-    // --- Durchschnittspreis --------------------------------------------------
 
     @Query("""
         select avg(r.sellPrice)

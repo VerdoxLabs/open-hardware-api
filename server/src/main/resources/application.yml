@@ -9,6 +9,12 @@ server:
       charset: UTF-8
       enabled: true
       force: true
+  error:
+    include-message: always
+    include-stacktrace: always
+    include-binding-errors: always
+    include-exception: true
+
 
 logging:
   level:

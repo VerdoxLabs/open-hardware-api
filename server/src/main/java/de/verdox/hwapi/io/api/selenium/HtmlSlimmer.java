@@ -392,6 +392,5 @@ public final class HtmlSlimmer {
                 + "</body></html>";
         Options o = new Options();
         String out = slimHtml(html, "https://example.com", o);
-        System.out.println(out);
     }
 }

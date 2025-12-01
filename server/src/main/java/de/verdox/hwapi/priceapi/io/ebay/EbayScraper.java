@@ -69,13 +69,14 @@ public class EbayScraper {
         List<EbaySoldItem> out = new ArrayList<>();
         int maxPages = Math.max(1, Math.min(10, pages));
 
+
         for (int p = 1; p <= maxPages; p++) {
             String url = buildUrl(marketplace, ean, ebayCategory, p, 240);
 
             Document doc = seleniumBasedWebScraper.fetch(marketplace.getDomain(), ean, url,
                     new FetchOptions()
                             .setTryHeadlessFirst(true)
-                            .setTtl(Duration.ofDays(0))
+                            .setTtl(Duration.ofSeconds(1))
                             .setSkipIfNotCache(false)
                             .setBeforeSaveOperation(driver -> {
                                 WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(20));
@@ -214,12 +215,5 @@ public class EbayScraper {
             }
         }
         return 0;
-    }
-
-    public static void main(String[] args) throws Exception {
-        ScrapingService.LOGGER.setLevel(Level.FINE);
-        for (EbaySoldItem ebaySoldItem : new EbayScraper("test").fetchByEan(EbayMarketplace.GERMANY, "YD270XBGAFBOX", EbayCategory.CPU, 1)) {
-            System.out.println(ebaySoldItem);
-        }
     }
 }

@@ -5,10 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.model.values.ItemCondition;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
@@ -40,6 +37,7 @@ import java.util.UUID;
                 @Index(name = "idx_rsi_ean_sellprice", columnList = "ean,sell_price")
         }
 )
+@ToString
 public class RemoteSoldItem {
 
     @Id
@@ -72,7 +70,7 @@ public class RemoteSoldItem {
     private ItemCondition condition;
 
     public RemoteSoldItem(String marketPlaceDomain, String marketPlaceItemID, String ean,
-                          BigDecimal sellPrice, Currency currency, LocalDate sellDate) {
+                          BigDecimal sellPrice, Currency currency, LocalDate sellDate, ItemCondition itemCondition) {
         this.uuid = deriveUUID(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate);
         this.marketPlaceDomain = marketPlaceDomain;
         this.marketPlaceItemID = marketPlaceItemID;
@@ -80,6 +78,7 @@ public class RemoteSoldItem {
         this.sellPrice = sellPrice;
         this.currency = currency;
         this.sellDate = sellDate;
+        this.condition = itemCondition;
     }
 
     public static UUID deriveUUID(String marketPlaceDomain, String marketPlaceItemID,

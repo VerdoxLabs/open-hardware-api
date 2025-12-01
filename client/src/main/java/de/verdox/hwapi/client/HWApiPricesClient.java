@@ -4,17 +4,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;
 import de.verdox.hwapi.model.values.Currency;
+import de.verdox.hwapi.model.values.ItemCondition;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class HWApiPricesClient extends HWApiClient {
+
+    private static final String SERIES_ACTIVE_PATH = "/prices/sold/series/fetchActive";
+    private static final String SERIES_COMPLETED_PATH = "/prices/sold/series/fetchCompleted";
+
     public HWApiPricesClient(String baseUrl) {
         super(baseUrl);
     }
@@ -79,7 +86,8 @@ public class HWApiPricesClient extends HWApiClient {
         if (resp.results() == null) return Map.of();
         return resp.results().stream()
                 .filter(HardwareSpecClient.AvgEntry::found)
-                .collect(Collectors.toMap(HardwareSpecClient.AvgEntry::ean, HardwareSpecClient.AvgEntry::value, (a, b) -> a, LinkedHashMap::new)); // Request-Reihenfolge bewahren
+                .collect(Collectors.toMap(HardwareSpecClient.AvgEntry::ean, HardwareSpecClient.AvgEntry::value,
+                        (a, b) -> a, LinkedHashMap::new)); // Request-Reihenfolge bewahren
     }
 
     /**
@@ -234,7 +242,6 @@ public class HWApiPricesClient extends HWApiClient {
 
             // Wenn der Server sagt: nicht gefunden / nur gecached-info, dann einfach leer zurück
             if (!"FOUND".equals(status)) {
-                // optional: unterscheiden
                 if ("NOT_FOUND_CACHED_24H".equals(status)) {
                     LOGGER.info("Price for " + ean + " not cached yet (status NOT_FOUND_CACHED_24H).");
                 } else {
@@ -257,6 +264,234 @@ public class HWApiPricesClient extends HWApiClient {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Neue Methoden: Serien (ACTIVE / COMPLETED) mit Polling & Timeout
+    // Endpoints: GET /prices/series/fetchActive, /prices/series/fetchCompleted
+    // -------------------------------------------------------------------------
+
+    public PriceSeriesResponseDTO fetchActiveSeriesOnce(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
+        return fetchSeriesOnce(SERIES_ACTIVE_PATH, mpns, eans, conditions, monthSince, fetchIfNoData);
+    }
+
+    public PriceSeriesResponseDTO fetchCompletedSeriesOnce(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
+        return fetchSeriesOnce(SERIES_COMPLETED_PATH, mpns, eans, conditions, monthSince, fetchIfNoData);
+    }
+
+    public PriceSeriesResponseDTO fetchActiveSeriesWithPolling(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince
+    ) {
+        return fetchSeriesWithPolling(SERIES_ACTIVE_PATH, mpns, eans, conditions, monthSince,
+                Duration.ofSeconds(30), Duration.ofSeconds(2));
+    }
+
+    public PriceSeriesResponseDTO fetchCompletedSeriesWithPolling(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince
+    ) {
+        return fetchSeriesWithPolling(SERIES_COMPLETED_PATH, mpns, eans, conditions, monthSince,
+                Duration.ofSeconds(30), Duration.ofSeconds(2));
+    }
+
+    public PriceSeriesResponseDTO fetchActiveSeriesWithPolling(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            Duration timeout,
+            Duration pollInterval
+    ) {
+        return fetchSeriesWithPolling(SERIES_ACTIVE_PATH, mpns, eans, conditions, monthSince, timeout, pollInterval);
+    }
+
+    public PriceSeriesResponseDTO fetchCompletedSeriesWithPolling(
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            Duration timeout,
+            Duration pollInterval
+    ) {
+        return fetchSeriesWithPolling(SERIES_COMPLETED_PATH, mpns, eans, conditions, monthSince, timeout, pollInterval);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper: Serienfetch & Polling (vermeidet duplizierten Code)
+    // -------------------------------------------------------------------------
+
+    public Map<String, PriceSeriesResponseDTO> fetchActiveSeriesBulkOnce(
+            List<String> keys,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
+        if (keys == null || keys.isEmpty()) {
+            return Map.of();
+        }
+
+        BulkSeriesRequest req = new BulkSeriesRequest(
+                keys,
+                conditions != null ? conditions : Set.of(),
+                monthSince,
+                fetchIfNoData
+        );
+
+        byte[] bytes = (byte[]) ((WebClient.RequestBodySpec) this.http.post()
+                .uri(SERIES_ACTIVE_BULK_PATH)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(req))
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .block();
+
+        try {
+            BulkSeriesResponse resp = this.om.readValue(bytes, BulkSeriesResponse.class);
+            if (resp.results() == null) {
+                return Map.of();
+            }
+
+            return resp.results().stream()
+                    .filter(e -> e.key() != null)
+                    .collect(Collectors.toMap(
+                            SeriesEntry::key,
+                            SeriesEntry::series,
+                            (a, b) -> a,
+                            LinkedHashMap::new
+                    ));
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot parse bulk series active response: " + new String(bytes, StandardCharsets.UTF_8), e);
+        }
+    }
+
+
+    public Map<String, PriceSeriesResponseDTO> fetchCompletedSeriesBulkOnce(
+            List<String> keys,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
+        if (keys == null || keys.isEmpty()) {
+            return Map.of();
+        }
+
+        BulkSeriesRequest req = new BulkSeriesRequest(
+                keys,
+                conditions != null ? conditions : Set.of(),
+                monthSince,
+                fetchIfNoData
+        );
+
+        byte[] bytes = this.http.post()
+                .uri(SERIES_COMPLETED_BULK_PATH)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(req)
+                .retrieve()
+                .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), this::toProblem)
+                .bodyToMono(byte[].class)
+                .block();
+
+        try {
+            BulkSeriesResponse resp = this.om.readValue(bytes, BulkSeriesResponse.class);
+            if (resp.results() == null) {
+                return Map.of();
+            }
+
+            return resp.results().stream()
+                    .filter(e -> e.key() != null)
+                    .collect(Collectors.toMap(
+                            SeriesEntry::key,
+                            SeriesEntry::series,
+                            (a, b) -> a,
+                            LinkedHashMap::new
+                    ));
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot parse bulk series completed response: " + new String(bytes, StandardCharsets.UTF_8), e);
+        }
+    }
+
+
+
+    private PriceSeriesResponseDTO fetchSeriesOnce(
+            String path,
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
+        String uri = uriBuilder(path, b -> {
+            if (mpns != null && !mpns.isEmpty()) {
+                mpns.forEach(mpn -> b.queryParam("MPNs", mpn));
+            }
+            if (eans != null && !eans.isEmpty()) {
+                eans.forEach(ean -> b.queryParam("EANs", ean));
+            }
+            if (conditions != null && !conditions.isEmpty()) {
+                conditions.forEach(c -> b.queryParam("conditions", c.name()));
+            }
+            b.queryParam("monthSince", monthSince);
+            b.queryParam("fetchIfNoData", fetchIfNoData);
+        });
+
+        return http.get()
+                .uri(uri)
+                .exchangeToMono(resp -> readJsonOrError(resp, PriceSeriesResponseDTO.class))
+                .block();
+    }
+
+    private PriceSeriesResponseDTO fetchSeriesWithPolling(
+            String path,
+            Set<String> mpns,
+            Set<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            Duration timeout,
+            Duration pollInterval
+    ) {
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            timeout = Duration.ofSeconds(30);
+        }
+        if (pollInterval == null || pollInterval.isZero() || pollInterval.isNegative()) {
+            pollInterval = Duration.ofSeconds(2);
+        }
+
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        PriceSeriesResponseDTO current = fetchSeriesOnce(path, mpns, eans, conditions, monthSince, true);
+
+        while (current != null
+                && current.refreshStarted()
+                && (current.series() == null || current.series().isEmpty())
+                && System.nanoTime() < deadlineNanos) {
+
+            try {
+                Thread.sleep(pollInterval.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+
+            current = fetchSeriesOnce(path, mpns, eans, conditions, monthSince, false);
+        }
+
+        return current;
+    }
 
     // -------------------------------------------------------------------------
     // Helper
@@ -277,4 +512,26 @@ public class HWApiPricesClient extends HWApiClient {
             throw new RuntimeException("Cannot parse price dto: " + new String(bytes, java.nio.charset.StandardCharsets.UTF_8), e);
         }
     }
+
+    public static final String SERIES_ACTIVE_BULK_PATH = "/prices/sold/series/fetchActive/bulk";
+    public static final String SERIES_COMPLETED_BULK_PATH = "/prices/sold/series/fetchCompleted/bulk";
+
+    public record BulkSeriesRequest(
+            List<String> keys,
+            Set<ItemCondition> conditions,
+            Integer monthSince,
+            Boolean fetchIfNoData
+    ) {}
+
+    public record SeriesEntry(
+            String key,
+            PriceSeriesResponseDTO series
+    ) {}
+
+    public record BulkSeriesResponse(
+            List<SeriesEntry> results
+    ) {}
+
+
 }
+

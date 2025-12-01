@@ -5,11 +5,11 @@ import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
 import de.verdox.hwapi.model.HardwareSpec;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;
 import de.verdox.hwapi.model.values.Currency;
+import de.verdox.hwapi.model.values.ItemCondition;
 import de.verdox.hwapi.priceapi.io.ebay.EbayScraper;
 import de.verdox.hwapi.priceapi.io.ebay.EbaySoldItem;
 import de.verdox.hwapi.priceapi.io.ebay.api.EbayCategory;
 import de.verdox.hwapi.priceapi.io.ebay.api.EbayMarketplace;
-import de.verdox.hwapi.priceapi.model.PriceLookupBlock;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
 import de.verdox.hwapi.priceapi.repository.PriceLookupBlockRepository;
 import de.verdox.hwapi.priceapi.repository.RemoteSoldItemRepository;
@@ -20,9 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -69,8 +67,8 @@ public class EbayCompletedListingsService {
             return new SpecLookupResult(null, identifier);
         }
         long end = System.currentTimeMillis() - start;
-        if(end >= Duration.ofMillis(500).toMillis()) {
-            LOGGER.info("\tTook ("+end+" ms) to find the hardware. We need more optimization!");
+        if (end >= Duration.ofMillis(500).toMillis()) {
+            LOGGER.info("\tTook (" + end + " ms) to find the hardware. We need more optimization!");
         }
 
         List<String> eans = (spec.getEANs() != null && !spec.getEANs().isEmpty()) ? List.copyOf(spec.getEANs()) : List.copyOf(spec.getMPNs());
@@ -141,117 +139,14 @@ public class EbayCompletedListingsService {
      * On-Demand Lookup für einen einzelnen EAN + Currency.
      * Wird vom Frontend-Button ausgelöst.
      */
-    public PriceLookupResult lookupPriceNow(String identifier, Currency currency) {
-        identifier = normalize(identifier);
-        if (identifier == null || identifier.isBlank()) {
-            return new PriceLookupResult(PriceLookupStatus.NOT_FOUND, null, currency, null);
-        }
 
-        // 0) Spec & kanonische EAN bestimmen (EAN oder MPN ist egal)
-        SpecLookupResult specResult = resolveSpecAndCanonicalEan(identifier);
-        if (specResult == null) {
-            return new PriceLookupResult(PriceLookupStatus.NOT_FOUND, identifier, currency, null);
-        }
-
-        String canonicalEan = specResult.canonicalEan();
-        HardwareSpec<?> spec = specResult.spec();
-
-        // 1) Negativ-Cache prüfen (pro canonicalEan + Currency)
-        Optional<PriceLookupBlock> blockOpt = priceLookupBlockRepository.findByEanAndCurrency(canonicalEan, currency);
-        if (blockOpt.isPresent() && blockOpt.get().getBlockedUntil().isAfter(Instant.now())) {
-            return new PriceLookupResult(PriceLookupStatus.NOT_FOUND_CACHED_24H, canonicalEan, currency, null);
-        }
-
-        // 2) DB prüfen (letzte 3 Monate)
-        Optional<BigDecimal> existing = getCurrentAveragePriceForEan(canonicalEan, currency, 3);
-
-        if (existing.isPresent()) {
-            return new PriceLookupResult(PriceLookupStatus.FOUND, canonicalEan, currency, existing.get());
-        }
-
-
-        // 3) Noch nichts: einen einmaligen Job für diese Spec+Currency starten/verwenden
-        String jobKey = canonicalEan + "|" + currency.name();
-        CompletableFuture<Void> jobFuture = jobs.computeIfAbsent(jobKey, key ->
-                CompletableFuture.runAsync(() -> {
-                    // 3.1 completed listings via Scraper (DE + US)
-                    try {
-                        Set<RemoteSoldItem> soldItems = fetchDataFromAllEbayMarketPlacesOnDemand(canonicalEan);
-                        for (RemoteSoldItem remoteSoldItem : soldItems) {
-                            save(
-                                    remoteSoldItem.getMarketPlaceDomain(),
-                                    remoteSoldItem.getMarketPlaceItemID(),
-                                    canonicalEan,
-                                    remoteSoldItem.getSellPrice(),
-                                    remoteSoldItem.getCurrency(),
-                                    remoteSoldItem.getSellDate()
-                            );
-                        }
-                    } catch (Exception e) {
-                        LOGGER.severe("Could not fetch completed listings");
-                    }
-
-                    // 3.2 aktive Listings via API (falls Spec bekannt)
-                    if (spec != null) {
-                        @SuppressWarnings("unchecked")
-                        Class<? extends HardwareSpec<?>> clazz =
-                                (Class<? extends HardwareSpec<?>>) spec.getClass();
-                        try {
-                            ebayAPITrackActiveListingsService.fetchActiveListings(
-                                    spec.getEANs(),
-                                    spec.getMPNs(),
-                                    Set.of(currency),
-                                    EbayMarketplace.GERMANY,
-                                    clazz
-                            );
-
-                        } catch (Exception e) {
-                            LOGGER.severe("Could not fetch active listings");
-                        }
-                    }
-                }, executorService).whenComplete((r, t) -> {
-                    // Job nach Abschluss aus der Map werfen
-                    jobs.remove(key);
-                })
-        );
-
-        // dieser Request wartet auf den ersten Job (wenn er schon läuft)
-        try {
-            jobFuture.join();
-        } catch (CompletionException ex) {
-            ScrapingService.LOGGER.log(Level.WARNING, "Error during lookup job for " + canonicalEan, ex);
-        }
-
-        // 4) Danach erneut DB prüfen
-        existing = getCurrentAveragePriceForEan(canonicalEan, currency, 3);
-        if (existing.isPresent()) {
-            return new PriceLookupResult(PriceLookupStatus.FOUND, canonicalEan, currency, existing.get());
-        }
-
-        // 5) Immer noch nichts → 24h blocken
-        Instant blockedUntil = Instant.now().plus(24, ChronoUnit.HOURS);
-
-        PriceLookupBlock block = priceLookupBlockRepository
-                .findByEanAndCurrency(canonicalEan, currency)
-                .orElseGet(PriceLookupBlock::new);
-
-        block.setEan(canonicalEan);
-        block.setCurrency(currency);
-        block.setBlockedUntil(blockedUntil);
-        priceLookupBlockRepository.save(block);
-
-        return new PriceLookupResult(PriceLookupStatus.NOT_FOUND, canonicalEan, currency, null);
-    }
 
     /**
      * On-Demand-Variante deiner bestehenden Scraper-Logik.
      * Nutzt ebayInstant statt background-Scraper.
      */
     public Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlacesOnDemand(String ean) {
-        Set<RemoteSoldItem> remoteItems = new HashSet<>();
-        remoteItems.addAll(fetchDataFromEbay(ebayInstant, EbayMarketplace.GERMANY, ean));
-        remoteItems.addAll(fetchDataFromEbay(ebayInstant, EbayMarketplace.USA, ean));
-        return remoteItems;
+        return fetchDataFromAllEbayMarketPlaces(ean, false);
     }
 
     // --------------------------
@@ -265,8 +160,7 @@ public class EbayCompletedListingsService {
     /**
      * Scrape alle gewünschten eBay-Marktplätze.
      */
-    private Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
-
+    public Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
         Set<RemoteSoldItem> remoteItems = new HashSet<>();
         EbayScraper ebayScraper = background ? ebayBackgroundScraper : ebayInstant;
 
@@ -323,12 +217,10 @@ public class EbayCompletedListingsService {
                 return Set.of();
             }
 
-
-            List<EbaySoldItem> fetched = new ArrayList<>();
-            fetched.addAll(ebayScraper.fetchByEan(ebayMarketplace, ean, ebayCategory, 1));
+            List<EbaySoldItem> fetched = new ArrayList<>(ebayScraper.fetchByEan(ebayMarketplace, hardwareSpec.getManufacturer() + " " + ean, ebayCategory, 1));
 
             for (EbaySoldItem ebaySoldItem : fetched) {
-                var saved = save(ebayMarketplace.getDomain(), ebaySoldItem.itemId(), EAN, ebaySoldItem.price().value(), ebaySoldItem.price().currency(), ebaySoldItem.soldDate());
+                var saved = save(ebayMarketplace.getDomain(), ebaySoldItem.condition(), ebaySoldItem.itemId(), EAN, ebaySoldItem.price().value(), ebaySoldItem.price().currency(), ebaySoldItem.soldDate());
                 if (saved == null) continue;
                 remoteItems.add(saved);
             }
@@ -339,7 +231,7 @@ public class EbayCompletedListingsService {
         }
     }
 
-    private synchronized RemoteSoldItem save(String marketPlaceDomain, String marketPlaceItemID, String ean, BigDecimal sellPrice, Currency currency, LocalDate sellDate) {
+    private synchronized RemoteSoldItem save(String marketPlaceDomain, List<String> condition, String marketPlaceItemID, String ean, BigDecimal sellPrice, Currency currency, LocalDate sellDate) {
 
         marketPlaceDomain = normalizeLower(marketPlaceDomain);
         marketPlaceItemID = normalize(marketPlaceItemID);
@@ -347,14 +239,52 @@ public class EbayCompletedListingsService {
         sellPrice = normalizePrice(sellPrice);
 
         UUID derived = RemoteSoldItem.deriveUUID(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate);
-        if (repo.findById(derived).isPresent()) {
+        var found = repo.findById(derived);
+
+        if(found.isPresent() && found.get().getCondition() != null) {
+            return found.get();
+        }
+
+        ItemCondition itemCondition = null;
+        for (String conditionString : condition) {
+
+            if (
+                    conditionString.toLowerCase().contains("gebraucht") ||
+                            conditionString.toLowerCase().contains("open box") ||
+                            conditionString.toLowerCase().contains("used") ||
+                            conditionString.toLowerCase().contains("pre-owned"
+                            )
+            ) {
+                itemCondition = ItemCondition.USED;
+            } else if (conditionString.toLowerCase().contains("refurbished")) {
+                itemCondition = ItemCondition.REFURBISHED;
+            } else if (conditionString.toLowerCase().contains("new") || conditionString.toLowerCase().contains("neu")) {
+                itemCondition = ItemCondition.NEW;
+            } else if (conditionString.toLowerCase().contains("defective") || conditionString.toLowerCase().contains("defekt")) {
+                itemCondition = ItemCondition.DEFECTIVE;
+            } else {
+                continue;
+            }
+        }
+
+        if (itemCondition == null) {
             return null;
         }
-        return repo.save(new RemoteSoldItem(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate));
+
+        RemoteSoldItem itemToSave;
+
+        if (found.isPresent()) {
+            itemToSave = found.get();
+            found.get().setCondition(itemCondition);
+        }
+        else {
+            itemToSave = new RemoteSoldItem(marketPlaceDomain, marketPlaceItemID, ean, sellPrice, currency, sellDate, itemCondition);
+        }
+        return repo.save(itemToSave);
     }
 
     private void save(PricePointUploadDto pricePointUploadDto) {
-        save(pricePointUploadDto.marketPlaceDomain(), pricePointUploadDto.marketPlaceItemID(), pricePointUploadDto.EAN(), pricePointUploadDto.sellPrice(), pricePointUploadDto.currency(), pricePointUploadDto.sellDate());
+        save(pricePointUploadDto.marketPlaceDomain(), List.of(ItemCondition.USED.name()), pricePointUploadDto.marketPlaceItemID(), pricePointUploadDto.EAN(), pricePointUploadDto.sellPrice(), pricePointUploadDto.currency(), pricePointUploadDto.sellDate());
     }
 
     private static int normalizeMonths(int monthsSince) {

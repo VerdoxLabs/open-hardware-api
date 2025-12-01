@@ -72,6 +72,10 @@ public class EbayAPITrackActiveListingsService {
             EbayMarketplace marketplace,
             Class<? extends HardwareSpec<?>> hardwareType
     ) {
+        if(this.ebayDeveloperAPIClient.isSandbox()) {
+            return Map.of();
+        }
+
         Map<String, List<RemoteActiveListing>> result = new HashMap<>();
         if (eans == null) eans = Set.of();
         if (mpns == null) mpns = Set.of();
@@ -137,13 +141,16 @@ public class EbayAPITrackActiveListingsService {
         return fetchActiveListings(eans, mpns, currencies, marketplace, type);
     }
 
-    private List<RemoteActiveListing> fetchActiveBySingleIdentifier(
+    public List<RemoteActiveListing> fetchActiveBySingleIdentifier(
             EbayMarketplace marketplace,
             EbayCategory ebayCategory,
             @Nullable String ean,
             @Nullable String mpn,
             Currency currency
     ) {
+        if(this.ebayDeveloperAPIClient.isSandbox()) {
+            return List.of();
+        }
         try {
             EbayBrowseSearchRequest.Builder builder = EbayBrowseSearchRequest
                     .builder(marketplace)
@@ -171,7 +178,7 @@ public class EbayAPITrackActiveListingsService {
 
             return parseJsonToActiveListings(res, ean, mpn, currency);
         } catch (Exception ex) {
-            LOGGER.log(Level.WARNING, "Error while fetching active listings from ebay", ex);
+            LOGGER.log(Level.WARNING, "Error while fetching active listings from ebay", ex.getMessage());
             return List.of();
         }
     }
