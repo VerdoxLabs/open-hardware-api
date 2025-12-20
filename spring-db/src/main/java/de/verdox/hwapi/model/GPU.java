@@ -10,7 +10,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 @Entity
 @DiscriminatorValue("GPU")
@@ -25,6 +27,19 @@ import java.util.Objects;
 public class GPU extends HardwareSpec<GPU> {
 
     @Override
+    public void sanitizeNumbers() {
+        this.model = getModel()
+                .replace(getManufacturer(), "")
+                .replace(getGpuCanonicalName(), "")
+                .replace(((int) getVramGb()) + " GB", "")
+                .replace("Graphics Card", "")
+                .replace("GeForce", "")
+                .replace("Radeon", "")
+                .replace("Arc", "")
+                .replace("Video Card", "");
+    }
+
+    @Override
     public void merge(GPU other) {
         super.merge(other);
         mergeNumber(other, GPU::getLengthMm, GPU::setLengthMm);
@@ -33,6 +48,7 @@ public class GPU extends HardwareSpec<GPU> {
         mergeEnum(other, GPU::getVramType, GPU::setVramType, HardwareTypes.VRAM_TYPE.UNKNOWN);
         mergeNumber(other, GPU::getVramGb, GPU::setVramGb);
         mergeNumber(other, GPU::getTdp, GPU::setTdp);
+        mergeSet(other, GPU::getColors, GPU::setColors);
         merge(other, GPU::getGpuCanonicalName, GPU::setGpuCanonicalName, s -> s == null || s.isBlank() || s.equals("unknown"));
     }
 
@@ -65,9 +81,19 @@ public class GPU extends HardwareSpec<GPU> {
 
     private double tdp = 0;
 
+    @ElementCollection
+    @CollectionTable(name="gpu_color", joinColumns=@JoinColumn(name="gpu_id"))
+    @Column(name="color", nullable=false)
+    private Set<String> colors = new HashSet<>();
+
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Override
+    public String displayName() {
+        return super.displayName() + " " +getGpuCanonicalName() + " "+vramGb+" GB";
     }
 
     @PostConstruct

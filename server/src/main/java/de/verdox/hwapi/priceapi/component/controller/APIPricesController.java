@@ -6,7 +6,7 @@ import de.verdox.hwapi.model.HardwareSpec;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;
 import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.model.values.ItemCondition;
-import de.verdox.hwapi.priceapi.component.service.EbayCompletedListingsService;
+import de.verdox.hwapi.priceapi.component.service.ebay.EbayCompletedListingsService;
 import de.verdox.hwapi.priceapi.component.service.ItemPriceService;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
 import de.verdox.hwapi.priceapi.repository.RemoteSoldItemRepository;
@@ -26,40 +26,66 @@ import java.util.logging.Logger;
 public class APIPricesController {
     private static final Logger LOGGER = Logger.getLogger(APIPricesController.class.getName());
     private static final int MAX_BULK_SIZE = 250;
+
     private final EbayCompletedListingsService service;
     private final ItemPriceService itemPriceService;
     private final HardwareSpecService hardwareSpecService;
 
-    public APIPricesController(EbayCompletedListingsService service, ItemPriceService itemPriceService, HardwareSpecService hardwareSpecService) {
+    public APIPricesController(EbayCompletedListingsService service,
+                               ItemPriceService itemPriceService,
+                               HardwareSpecService hardwareSpecService) {
         this.service = service;
         this.itemPriceService = itemPriceService;
         this.hardwareSpecService = hardwareSpecService;
     }
 
-    /**
-     * Bulk-Upload: mehrere Price Points
-     * POST /api/v1/prices/{ean}/points
-     */
+    // ------------------------------------------------------------
+    // Upload
+    // ------------------------------------------------------------
+
     @PostMapping("/points")
-    public ResponseEntity<BulkResult> uploadPricePoints(
-            @RequestBody List<PricePointUploadDto> body
-    ) {
-        if (body == null || body.isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
+    public ResponseEntity<BulkResult> uploadPricePoints(@RequestBody List<PricePointUploadDto> body) {
+        if (body == null || body.isEmpty()) return ResponseEntity.badRequest().build();
+
         var saved = service.createAll(body);
         var ids = saved.stream().map(RemoteSoldItem::getUuid).toList();
-        var result = new BulkResult(body.size(), saved.size(), ids);
-        return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new BulkResult(body.size(), saved.size(), ids));
     }
 
-    @PostMapping("/series/fetchCompleted/bulk")
-    public ResponseEntity<BulkSeriesResponse> getSeriesForCompletedBulk(
-            @RequestBody BulkSeriesRequest req
+    // ------------------------------------------------------------
+    // ✅ NEW: Bulk series by exact identifiers (MPN/EAN)
+    // ------------------------------------------------------------
+
+    @PostMapping("/series/fetchActive/bulkByIds")
+    public ResponseEntity<BulkSeriesResponseV2> getSeriesForActiveBulkByIds(
+            @RequestBody BulkSeriesRequestV2 req
     ) {
-        if (req.keys() == null || req.keys().isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
+        return handleBulkSeriesByIds(SeriesKind.ACTIVE, req);
+    }
+
+    @PostMapping("/series/fetchCompleted/bulkByIds")
+    public ResponseEntity<BulkSeriesResponseV2> getSeriesForCompletedBulkByIds(
+            @RequestBody BulkSeriesRequestV2 req
+    ) {
+        return handleBulkSeriesByIds(SeriesKind.COMPLETED, req);
+    }
+
+    private ResponseEntity<BulkSeriesResponseV2> handleBulkSeriesByIds(
+            SeriesKind kind,
+            BulkSeriesRequestV2 req
+    ) {
+        List<String> mpns = Optional.ofNullable(req.mpns()).orElse(List.of());
+        List<String> eans = Optional.ofNullable(req.eans()).orElse(List.of());
+
+        // in-request Reihenfolge erhalten (mpns dann eans) – du kannst das auch anders machen,
+        // aber: wichtig ist, dass Response deterministisch ist.
+        List<String> requested = new ArrayList<>(mpns.size() + eans.size());
+        for (String s : mpns) if (s != null && !s.isBlank()) requested.add(urlDecode(s));
+        for (String s : eans) if (s != null && !s.isBlank()) requested.add(urlDecode(s));
+
+        if (requested.isEmpty()) return ResponseEntity.badRequest().build();
+        if (requested.size() > MAX_BULK_SIZE) return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build();
 
         int monthSince = Optional.ofNullable(req.monthSince()).orElse(12);
         Set<ItemCondition> conditions = Optional.ofNullable(req.conditions())
@@ -67,80 +93,70 @@ public class APIPricesController {
                 .orElse(EnumSet.allOf(ItemCondition.class));
         boolean fetchIfNoData = Optional.ofNullable(req.fetchIfNoData()).orElse(false);
 
-        // 1) Keys normalisieren + decodieren
-        List<String> decodedKeys = req.keys().stream()
-                .filter(Objects::nonNull)
-                .map(k -> URLDecoder.decode(k, StandardCharsets.UTF_8))
-                .toList();
+        // 1) Specs in einem Rutsch holen
+        //    findAllByEANOrMPN(List<String>) sollte alles matchen können.
+        List<HardwareSpec<?>> specs = hardwareSpecService.findAllByEANOrMPN(requested);
 
-        // 2) Alle Specs in einem Rutsch holen
-        List<HardwareSpec<?>> hardwareSpecs = hardwareSpecService.findAllByEANOrMPN(decodedKeys);
+        // 2) Index: identifier -> spec (best effort)
+        //    Wichtig: ein Spec kann mehrere mpns/eans haben.
+        Map<String, HardwareSpec<?>> byId = new HashMap<>(requested.size() * 2);
+        for (HardwareSpec<?> s : specs) {
+            if (s == null) continue;
+            if (s.getMPNs() != null) {
+                for (String m : s.getMPNs()) {
+                    if (m != null && !m.isBlank()) byId.putIfAbsent(m.trim(), s);
+                }
+            }
+            if (s.getEANs() != null) {
+                for (String e : s.getEANs()) {
+                    if (e != null && !e.isBlank()) byId.putIfAbsent(e.trim(), s);
+                }
+            }
+        }
 
-        List<SeriesEntry> results = new ArrayList<>(req.keys().size());
+        // 3) Results: in exakt der Request-Reihenfolge
+        List<SeriesEntryV2> results = new ArrayList<>(requested.size());
 
-        for (HardwareSpec<?> hardwareSpec : hardwareSpecs) {
-            var key = hardwareSpec.getMPNs().stream().findFirst().orElse("");
-            var dbResultActive = itemPriceService.fetchCompletedSeriesDataFromDB(hardwareSpec, conditions, monthSince);
-            if (!dbResultActive.series().isEmpty()) {
-                results.add(new SeriesEntry(key, dbResultActive));
+        for (String identifier : requested) {
+            HardwareSpec<?> spec = byId.get(identifier);
+
+            if (spec == null) {
+                results.add(new SeriesEntryV2(identifier, new PriceSeriesResponseDTO(false, List.of())));
+                continue;
+            }
+
+            PriceSeriesResponseDTO dbResult = (kind == SeriesKind.ACTIVE)
+                    ? itemPriceService.fetchActiveSeriesDataFromDB(spec, conditions, monthSince)
+                    : itemPriceService.fetchCompletedSeriesDataFromDB(spec, conditions, monthSince);
+
+            if (dbResult != null && dbResult.series() != null && !dbResult.series().isEmpty()) {
+                results.add(new SeriesEntryV2(identifier, dbResult));
                 continue;
             }
 
             if (fetchIfNoData) {
-                var remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(hardwareSpec, false);
-                results.add(new SeriesEntry(key, remoteJobDto));
+                // NOTE: dein fetchSeriesDataFromRemote scheint “generisch” zu sein.
+                //       Wenn du remote active/completed trennen willst, mach 2 Methoden draus.
+                PriceSeriesResponseDTO remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(spec, false);
+                results.add(new SeriesEntryV2(identifier, remoteJobDto != null ? remoteJobDto : new PriceSeriesResponseDTO(false, List.of())));
             } else {
-                itemPriceService.addToBackgroundJob(hardwareSpec);
-                results.add(new SeriesEntry(key, new PriceSeriesResponseDTO(false, List.of())));
+                itemPriceService.addToBackgroundJob(spec);
+                results.add(new SeriesEntryV2(identifier, new PriceSeriesResponseDTO(false, List.of())));
             }
         }
-        return ResponseEntity.ok(new BulkSeriesResponse(results));
+
+        return ResponseEntity.ok(new BulkSeriesResponseV2(results));
     }
 
-    @PostMapping("/series/fetchActive/bulk")
-    public ResponseEntity<BulkSeriesResponse> getSeriesForActiveBulk(
-            @RequestBody BulkSeriesRequest req
-    ) {
-        if (req.keys() == null || req.keys().isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        int monthSince = Optional.ofNullable(req.monthSince()).orElse(12);
-        Set<ItemCondition> conditions = Optional.ofNullable(req.conditions())
-                .filter(c -> !c.isEmpty())
-                .orElse(EnumSet.allOf(ItemCondition.class));
-        boolean fetchIfNoData = Optional.ofNullable(req.fetchIfNoData()).orElse(false);
-
-        // 1) Keys normalisieren + decodieren
-        List<String> decodedKeys = req.keys().stream()
-                .filter(Objects::nonNull)
-                .map(k -> URLDecoder.decode(k, StandardCharsets.UTF_8))
-                .toList();
-
-        // 2) Alle Specs in einem Rutsch holen
-        List<HardwareSpec<?>> hardwareSpecs = hardwareSpecService.findAllByEANOrMPN(decodedKeys);
-
-        List<SeriesEntry> results = new ArrayList<>(req.keys().size());
-
-        for (HardwareSpec<?> hardwareSpec : hardwareSpecs) {
-            var key = hardwareSpec.getMPNs().stream().findFirst().orElse("");
-            var dbResultActive = itemPriceService.fetchActiveSeriesDataFromDB(hardwareSpec, conditions, monthSince);
-            if (!dbResultActive.series().isEmpty()) {
-                results.add(new SeriesEntry(key, dbResultActive));
-                continue;
-            }
-
-            if (fetchIfNoData) {
-                var remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(hardwareSpec, false);
-                results.add(new SeriesEntry(key, remoteJobDto));
-            } else {
-                itemPriceService.addToBackgroundJob(hardwareSpec);
-                results.add(new SeriesEntry(key, new PriceSeriesResponseDTO(false, List.of())));
-            }
-        }
-        return ResponseEntity.ok(new BulkSeriesResponse(results));
+    private static String urlDecode(String s) {
+        return URLDecoder.decode(s, StandardCharsets.UTF_8);
     }
 
+    private enum SeriesKind { ACTIVE, COMPLETED }
+
+    // ------------------------------------------------------------
+    // Single endpoints (kannst du später auch “byIds” vereinheitlichen)
+    // ------------------------------------------------------------
 
     @GetMapping("/series/fetchActive")
     public ResponseEntity<PriceSeriesResponseDTO> getSeriesForActive(
@@ -150,39 +166,7 @@ public class APIPricesController {
             @RequestParam(value = "monthSince") int monthSince,
             @RequestParam(value = "fetchIfNoData", defaultValue = "false") boolean fetchIfNoData
     ) {
-        if ((mpns == null || mpns.isEmpty()) && (eans == null || eans.isEmpty())) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        HardwareSpec<?> hardwareSpec;
-        if (mpns != null && !mpns.isEmpty()) {
-            hardwareSpec = hardwareSpecService.findByEANOrMPN(URLDecoder.decode(mpns.getFirst(), StandardCharsets.UTF_8));
-        } else {
-            hardwareSpec = hardwareSpecService.findByEANOrMPN(URLDecoder.decode(eans.getFirst(), StandardCharsets.UTF_8));
-        }
-
-        if (hardwareSpec == null) {
-            return ResponseEntity.notFound().build();
-        }
-
-        //var dbResultCompleted = itemPriceService.fetchCompletedSeriesDataFromDB(hardwareSpec, conditions, monthSince);
-        var dbResultActive = itemPriceService.fetchActiveSeriesDataFromDB(hardwareSpec, conditions, monthSince);
-        if (!dbResultActive.series().isEmpty()) {
-            return ResponseEntity.ok(dbResultActive);
-        }
-
-        if (fetchIfNoData) {
-            var remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(hardwareSpec, false);
-            return ResponseEntity.ok(remoteJobDto);
-        }
-        itemPriceService.addToBackgroundJob(hardwareSpec);
-
-        return ResponseEntity.ok(
-                new PriceSeriesResponseDTO(
-                        false,
-                        List.of()
-                )
-        );
+        return getSeriesSingle(SeriesKind.ACTIVE, mpns, eans, conditions, monthSince, fetchIfNoData);
     }
 
     @GetMapping("/series/fetchCompleted")
@@ -193,227 +177,122 @@ public class APIPricesController {
             @RequestParam(value = "monthSince") int monthSince,
             @RequestParam(value = "fetchIfNoData", defaultValue = "false") boolean fetchIfNoData
     ) {
+        return getSeriesSingle(SeriesKind.COMPLETED, mpns, eans, conditions, monthSince, fetchIfNoData);
+    }
+
+    private ResponseEntity<PriceSeriesResponseDTO> getSeriesSingle(
+            SeriesKind kind,
+            List<String> mpns,
+            List<String> eans,
+            Set<ItemCondition> conditions,
+            int monthSince,
+            boolean fetchIfNoData
+    ) {
         if ((mpns == null || mpns.isEmpty()) && (eans == null || eans.isEmpty())) {
             return ResponseEntity.badRequest().build();
         }
 
-        HardwareSpec<?> hardwareSpec;
-        if (mpns != null && !mpns.isEmpty()) {
-            hardwareSpec = hardwareSpecService.findByEANOrMPN(URLDecoder.decode(mpns.getFirst(), StandardCharsets.UTF_8));
-        } else {
-            hardwareSpec = hardwareSpecService.findByEANOrMPN(URLDecoder.decode(eans.getFirst(), StandardCharsets.UTF_8));
-        }
+        String first = null;
+        if (mpns != null && !mpns.isEmpty()) first = urlDecode(mpns.getFirst());
+        else if (eans != null && !eans.isEmpty()) first = urlDecode(eans.getFirst());
 
-        if (hardwareSpec == null) {
-            LOGGER.warning("Hardware Spec not found for " + mpns + " and " + eans);
-            return ResponseEntity.notFound().build();
-        }
+        if (first == null || first.isBlank()) return ResponseEntity.badRequest().build();
 
-        var dbResultCompleted = itemPriceService.fetchCompletedSeriesDataFromDB(hardwareSpec, conditions, monthSince);
-        if (!dbResultCompleted.series().isEmpty()) {
-            return ResponseEntity.ok(dbResultCompleted);
+        HardwareSpec<?> hardwareSpec = hardwareSpecService.findByEANOrMPN(first);
+        if (hardwareSpec == null) return ResponseEntity.notFound().build();
+
+        PriceSeriesResponseDTO dbResult = (kind == SeriesKind.ACTIVE)
+                ? itemPriceService.fetchActiveSeriesDataFromDB(hardwareSpec, conditions, monthSince)
+                : itemPriceService.fetchCompletedSeriesDataFromDB(hardwareSpec, conditions, monthSince);
+
+        if (dbResult != null && dbResult.series() != null && !dbResult.series().isEmpty()) {
+            return ResponseEntity.ok(dbResult);
         }
 
         if (fetchIfNoData) {
-            var remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(hardwareSpec, false);
-            return ResponseEntity.ok(remoteJobDto);
+            PriceSeriesResponseDTO remoteJobDto = itemPriceService.fetchSeriesDataFromRemote(hardwareSpec, false);
+            return ResponseEntity.ok(remoteJobDto != null ? remoteJobDto : new PriceSeriesResponseDTO(false, List.of()));
         }
-        itemPriceService.addToBackgroundJob(hardwareSpec);
 
-        return ResponseEntity.ok(
-                new PriceSeriesResponseDTO(
-                        false,
-                        List.of()
-                )
-        );
+        itemPriceService.addToBackgroundJob(hardwareSpec);
+        return ResponseEntity.ok(new PriceSeriesResponseDTO(false, List.of()));
     }
 
-    // --- AVG CURRENT ---
-    // Default 3 Monate, optional ?currency=EUR
+    // ------------------------------------------------------------
+    // AVG / SERIES DB (unverändert)
+    // ------------------------------------------------------------
+
     @GetMapping("/{ean}/avg-current")
     public ResponseEntity<BigDecimal> getAvgCurrentDefault(
             @PathVariable String ean,
-            @RequestParam(value = "currency", required = false) String currency) {
-        return service.getCurrentAveragePriceForEan(ean, currency != null ? Currency.findCurrency(currency) : Currency.US_DOLLAR, 3)
+            @RequestParam(value = "currency", required = false) String currency
+    ) {
+        return service.getCurrentAveragePriceForEan(
+                        ean,
+                        currency != null ? Currency.findCurrency(currency) : Currency.US_DOLLAR,
+                        3
+                )
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    // Mit monthsSince, optional ?currency=EUR
     @GetMapping("/{ean}/avg-current/{monthsSince}")
     public ResponseEntity<BigDecimal> getAvgCurrent(
             @PathVariable String ean,
             @PathVariable @Min(0) int monthsSince,
-            @RequestParam(value = "currency", required = false) String currency) {
-        return service.getCurrentAveragePriceForEan(ean, currency != null ? Currency.findCurrency(currency) : Currency.US_DOLLAR, monthsSince)
+            @RequestParam(value = "currency", required = false) String currency
+    ) {
+        return service.getCurrentAveragePriceForEan(
+                        ean,
+                        currency != null ? Currency.findCurrency(currency) : Currency.US_DOLLAR,
+                        monthsSince
+                )
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    // --- SERIES (alle Daten) ---
     @GetMapping("/{ean}/series")
     public List<RemoteSoldItemRepository.PricePoint> getSeriesFromDB(@PathVariable String ean) {
         return service.getAllPricesForEan(ean);
     }
 
-    // --- SERIES RECENT ---
-
-    // Ohne monthsSince → Default 3
     @GetMapping("/{ean}/series/recent")
     public List<RemoteSoldItemRepository.PricePoint> getSeriesRecentDefault(@PathVariable String ean) {
         return service.getRecentPricesForEan(ean, 3);
     }
 
-    // Mit monthsSince
     @GetMapping("/{ean}/series/recent/{monthsSince}")
     public List<RemoteSoldItemRepository.PricePoint> getSeriesRecent(
             @PathVariable String ean,
-            @PathVariable int monthsSince) {
-
+            @PathVariable int monthsSince
+    ) {
         return service.getRecentPricesForEan(ean, monthsSince);
     }
 
+    // ------------------------------------------------------------
+    // DTOs
+    // ------------------------------------------------------------
 
-    /**
-     * BULK: avg-current für viele EANs
-     * POST /api/v1/prices/avg-current/bulk
-     * <p>
-     * Beispiele:
-     * 1) Nur EAN-Liste (defaults: USD, monthsSince=3):
-     * Body: ["4012345678901", "4023456789012"]
-     * <p>
-     * 2) Mit Parametern:
-     * Body: { "eans": ["401...", "402..."], "monthsSince": 6, "currency": "EUR" }
-     */
-    @PostMapping("/avg-current/bulk")
-    public ResponseEntity<BulkAvgCurrentResponse> getAvgCurrentBulk(
-            @RequestBody Object body
-    ) {
-        BulkAvgCurrentRequest req = coerceToBulkRequest(body);
-
-        if (req.eans() == null || req.eans().isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-        if (req.eans().size() > MAX_BULK_SIZE) {
-            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build();
-        }
-
-        final int months = req.monthsSince() != null ? Math.max(0, req.monthsSince()) : 3;
-        final Currency currency = req.currency() != null
-                ? Currency.findCurrency(req.currency())
-                : Currency.US_DOLLAR;
-
-        // stabile Reihenfolge wie Request
-        List<AvgEntry> results = new ArrayList<>(req.eans().size());
-        for (String ean : req.eans()) {
-            if (ean == null || ean.isBlank()) {
-                results.add(new AvgEntry(null, null, false));
-                continue;
-            }
-            var opt = service.getCurrentAveragePriceForEan(ean, currency, months);
-            results.add(new AvgEntry(ean, opt.orElse(null), opt.isPresent()));
-        }
-
-        return ResponseEntity.ok(new BulkAvgCurrentResponse(currency.name(), months, results));
-    }
-
-    /**
-     * Erlaubt sowohl eine pure String-Liste als Body als auch ein Objekt mit Feldern:
-     * { "eans": [...], "monthsSince": 3, "currency": "EUR" }
-     */
-    @SuppressWarnings("unchecked")
-    private BulkAvgCurrentRequest coerceToBulkRequest(Object body) {
-        if (body instanceof List<?> list) {
-            // Liste von EANs
-            List<String> eans = list.stream()
-                    .filter(Objects::nonNull)
-                    .map(Object::toString)
-                    .toList();
-            return new BulkAvgCurrentRequest(eans, null, null);
-        }
-        if (body instanceof Map<?, ?> map) {
-            Object eansObj = map.get("eans");
-            List<String> eans;
-            if (eansObj instanceof List<?> l) {
-                eans = l.stream().filter(Objects::nonNull).map(Object::toString).toList();
-            } else {
-                eans = List.of();
-            }
-            Integer months = null;
-            Object m = map.get("monthsSince");
-            if (m != null) {
-                try {
-                    months = Integer.parseInt(m.toString());
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            String currency = null;
-            Object c = map.get("currency");
-            if (c != null) currency = c.toString();
-            return new BulkAvgCurrentRequest(eans, months, currency);
-        }
-        // Falsches Format
-        return new BulkAvgCurrentRequest(List.of(), null, null);
-    }
-
-    public record BulkAvgCurrentRequest(
+    public record BulkSeriesRequestV2(
+            List<String> mpns,
             List<String> eans,
-            Integer monthsSince,
-            String currency
-    ) {
-    }
+            Set<ItemCondition> conditions,
+            Integer monthSince,
+            Boolean fetchIfNoData
+    ) {}
 
-    public record BulkAvgCurrentResponse(
-            String currency,
-            int monthsSince,
-            List<AvgEntry> results
-    ) {
-    }
+    public record SeriesEntryV2(
+            String identifier,
+            PriceSeriesResponseDTO series
+    ) {}
 
-    public record AvgEntry(
-            String ean,
-            BigDecimal value,
-            boolean found
-    ) {
-    }
+    public record BulkSeriesResponseV2(
+            List<SeriesEntryV2> results
+    ) {}
 
     public record BulkResult(
             int total,
             int created,
             List<UUID> ids
-    ) {
-    }
-
-    public record PriceLookupRequest(
-            String ean,
-            Currency currency
-    ) {
-    }
-
-    public record PriceLookupResponse(
-            String ean,
-            String currency,
-            String status,   // FOUND / NOT_FOUND / NOT_FOUND_CACHED_24H
-            BigDecimal value // null falls kein Preis
-    ) {
-    }
-
-    public record BulkSeriesRequest(
-            List<String> keys,
-            Set<ItemCondition> conditions,
-            Integer monthSince,
-            Boolean fetchIfNoData
-    ) {
-    }
-
-    public record SeriesEntry(
-            String key,
-            PriceSeriesResponseDTO series
-    ) {
-    }
-
-    public record BulkSeriesResponse(
-            List<SeriesEntry> results
-    ) {
-    }
+    ) {}
 }

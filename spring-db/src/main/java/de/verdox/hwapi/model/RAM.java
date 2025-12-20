@@ -9,6 +9,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.HashSet;
+import java.util.Set;
+
 @Entity
 @DiscriminatorValue("RAM")
 @Getter
@@ -32,6 +35,12 @@ public class RAM extends HardwareSpec<RAM> {
         mergeNumber(other, RAM::getRowAddressToColumnAddressDelay, RAM::setRowAddressToColumnAddressDelay);
         mergeNumber(other, RAM::getRowPrechargeTime, RAM::setRowPrechargeTime);
         mergeNumber(other, RAM::getRowActiveTime, RAM::setRowActiveTime);
+        mergeSet(other, RAM::getColors, RAM::setColors);
+    }
+
+    @Override
+    public String displayName() {
+        return super.displayName() + " " + getTotalSizeGB() + " GB " + getType().name() + " @" + speedMtps + "Mhz CL" + casLatency;
     }
 
     @Enumerated(EnumType.STRING)
@@ -70,9 +79,19 @@ public class RAM extends HardwareSpec<RAM> {
 
     private boolean hasHeatSpreader;
 
+    @ElementCollection
+    @CollectionTable(name="ram_color", joinColumns=@JoinColumn(name="ram_id"))
+    @Column(name="color", nullable=false)
+    private Set<String> colors = new HashSet<>();
+
     @Override
     public void checkIfLegal() {
 
+    }
+
+    @Transient
+    public int getFirstWordLatency() {
+        return getCasLatency() * 2000 / getSpeedMtps();
     }
 
     @Transient

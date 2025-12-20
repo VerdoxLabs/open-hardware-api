@@ -1,0 +1,1 @@
+ALTER TABLE remote_active_listing ADD COLUMN IF NOT EXISTS product_manufacturer VARCHAR(255);

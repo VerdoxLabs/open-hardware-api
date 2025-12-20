@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -22,6 +23,17 @@ import java.util.Set;
         includeAllAttributes = true
 )
 public class CPUCooler extends HardwareSpec<CPUCooler> {
+
+    @Override
+    public void sanitize() {
+        super.sanitize();
+        setModel(getModel()
+                .replace("CPU", "")
+                .replace("Cooler", "")
+                .replace(getManufacturer(), "")
+        );
+    }
+
     @Override
     public void merge(CPUCooler other) {
         super.merge(other);
@@ -29,6 +41,9 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
         mergeEnumCollection(other, CPUCooler::getSupportedSockets);
         mergeNumber(other, CPUCooler::getRadiatorLengthMm, CPUCooler::setRadiatorLengthMm);
         mergeNumber(other, CPUCooler::getTdpWatts, CPUCooler::setTdpWatts);
+        mergeSet(other, CPUCooler::getColors, CPUCooler::setColors);
+        mergeNumber(other, CPUCooler::getFanRPM, CPUCooler::setFanRPM);
+        mergeNumber(other, CPUCooler::getNoiseLevelDB, CPUCooler::setNoiseLevelDB);
     }
 
     @Enumerated(EnumType.STRING)
@@ -47,6 +62,19 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
 
     @PositiveOrZero
     private Integer tdpWatts = 0;
+
+    @PositiveOrZero
+    @Column(name = "fan_rpm")
+    private Integer fanRPM = 0;
+
+    @PositiveOrZero
+    @Column(name = "noise_level_db")
+    private Double noiseLevelDB = 0D;
+
+    @ElementCollection
+    @CollectionTable(name="cpucooler_color", joinColumns=@JoinColumn(name="cpucooler_id"))
+    @Column(name="color", nullable=false)
+    private Set<String> colors = new HashSet<>();
 
 
     @Override

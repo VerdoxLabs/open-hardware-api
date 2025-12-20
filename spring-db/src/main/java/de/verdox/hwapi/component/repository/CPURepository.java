@@ -1,7 +1,6 @@
 package de.verdox.hwapi.component.repository;
 
 import de.verdox.hwapi.model.CPU;
-import de.verdox.hwapi.model.CPUCooler;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

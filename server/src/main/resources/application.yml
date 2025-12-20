@@ -33,3 +33,53 @@ spring.jpa.properties.hibernate.default_batch_fetch_size: 64
 spring.jpa.properties.hibernate.jdbc.batch_size: 50
 spring.jpa.properties.hibernate.order_inserts: true
 spring.jpa.properties.hibernate.order_updates: true
+
+logging.level.root: INFO
+logging.level.com.ebay.api.feed: INFO
+logging.level.org.asynchttpclient: WARN
+
+logging.level.com.ebay.feed.api: DEBUG
+
+
+amazon:
+  paapi:
+    marketplaces:
+      DE:
+        enabled: true
+        access-key: ${AMAZON_PAAPI_DE_ACCESS_KEY}
+        secret-key: ${AMAZON_PAAPI_DE_SECRET_KEY}
+        partner-tag: verdox-21
+
+      US:
+        enabled: false
+        access-key: ${AMAZON_PAAPI_US_ACCESS_KEY:}
+        secret-key: ${AMAZON_PAAPI_US_SECRET_KEY:}
+        partner-tag: deinshop-20
+
+      UK:
+        enabled: false
+        access-key: ${AMAZON_PAAPI_UK_ACCESS_KEY:}
+        secret-key: ${AMAZON_PAAPI_UK_SECRET_KEY:}
+        partner-tag: deinshop-21
+
+ebay:
+  feed:
+    # OAuth Client Credentials für eBay
+    client-id: ${EBAY_CLIENT_ID}
+    client-secret: ${EBAY_CLIENT_SECRET}
+
+    # Globale Kategorie für ITEM-Feed (z. B. 58058 = PC-Komponenten)
+    # Kann später je Marketplace überschrieben werden
+    category-id: ${EBAY_FEED_CATEGORY_ID:58058}
+
+    # Hauptverzeichnis für Feeddownloads
+    download-directory: ${EBAY_FEED_DOWNLOAD_DIR:/tmp/ebay-feeds}
+
+    # Welche Marktplätze wollen wir aktiv nutzen?
+    # Diese Namen müssen exakt mit deinem Enum übereinstimmen
+    enabled-marketplaces:
+      - ${EBAY_FEED_MARKETPLACE_1:GERMANY}
+      - ${EBAY_FEED_MARKETPLACE_2:AUSTRIA}
+      - ${EBAY_FEED_MARKETPLACE_3:SWITZERLAND}
+      - ${EBAY_FEED_MARKETPLACE_4:USA}
+      - ${EBAY_FEED_MARKETPLACE_5:UK}

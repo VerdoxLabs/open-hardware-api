@@ -270,19 +270,19 @@ public class CaseKingScrapers {
 
                                     int usb3_2C = (int) parseFirstInt("USB 3.2 (extern) Type C", specs);
                                     if (usb3_2C > 0)
-                                        mb.getUsbPort().add(new USBPort(HardwareTypes.UsbConnectorType.USB_C, HardwareTypes.UsbVersion.USB3_2_GEN2, usb3_2C));
+                                        mb.addOrMerge(new USBPort(HardwareTypes.UsbConnectorType.USB_C, HardwareTypes.UsbVersion.USB3_2_GEN2, usb3_2C));
 
                                     int usb3_1A = (int) parseFirstInt("USB 3.1 (extern) Type A", specs);
                                     if (usb3_1A > 0)
-                                        mb.getUsbPort().add(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB3_1, usb3_1A));
+                                        mb.addOrMerge(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB3_1, usb3_1A));
 
                                     int usb3_0A = (int) parseFirstInt("USB 3.0 (extern) Type A", specs);
                                     if (usb3_0A > 0)
-                                        mb.getUsbPort().add(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB3_0, usb3_0A));
+                                        mb.addOrMerge(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB3_0, usb3_0A));
 
                                     int usb2_0A = (int) parseFirstInt("USB 2.0 (extern) Type A", specs);
                                     if (usb2_0A > 0)
-                                        mb.getUsbPort().add(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB2_0, usb2_0A));
+                                        mb.addOrMerge(new USBPort(HardwareTypes.UsbConnectorType.USB_A, HardwareTypes.UsbVersion.USB2_0, usb2_0A));
                                 },
                                 "https://www.caseking.de/pc-komponenten/mainboards/amd",
                                 "https://www.caseking.de/pc-komponenten/mainboards/intel")

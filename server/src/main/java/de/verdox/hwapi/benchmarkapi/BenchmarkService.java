@@ -96,7 +96,6 @@ public class BenchmarkService {
             return exact.get();
         }
         Set<BENCHMARK> candidates = repo.findBySource(source);
-
         return QueryUtil.search(queryModelName, candidates, benchmark -> benchmark.getModelName()).orElse(null);
     }
 }

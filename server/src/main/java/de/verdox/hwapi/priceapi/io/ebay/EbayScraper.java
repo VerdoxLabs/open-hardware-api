@@ -8,8 +8,8 @@ import de.verdox.hwapi.io.api.selenium.FScrapingCache;
 import de.verdox.hwapi.io.api.selenium.FetchOptions;
 import de.verdox.hwapi.io.api.selenium.SeleniumBasedWebScraper;
 import de.verdox.hwapi.model.values.Currency;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayCategory;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayMarketplace;
+import de.verdox.hwapi.client.ebay.EbayCategory;
+import de.verdox.hwapi.client.ebay.EbayMarketplace;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.openqa.selenium.By;
@@ -179,7 +179,7 @@ public class EbayScraper {
             Number n = mkt.getNumberFormat().parse(numPart);
             value = new BigDecimal(n.toString());
         } catch (ParseException e) {
-            System.out.println("Could not parse " + numPart + " with " + mkt.getNumberFormat().getCurrency());
+            ScrapingService.LOGGER.log(Level.WARNING, "Could not parse " + numPart + " with " + mkt.getNumberFormat().getCurrency(), e);
         }
 
         return new Price(value, currency);

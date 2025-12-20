@@ -9,6 +9,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -29,9 +30,10 @@ public class PCCase extends HardwareSpec<PCCase> {
         super.merge(other);
         mergeEnum(other, PCCase::getSizeClass, PCCase::setSizeClass, HardwareTypes.CaseSizeClass.UNKNOWN);
         merge(other, PCCase::getDimensions, PCCase::setDimensions, dimensionsMm -> dimensionsMm == null || (dimensionsMm.getDepth() == 0 || dimensionsMm.getHeight() == 0 || dimensionsMm.getWidth() == 0));
-        mergeSet(other, PCCase::getMotherboardSupport);
+        mergeSet(other, PCCase::getMotherboardSupport, PCCase::setMotherboardSupport);
         mergeNumber(other, PCCase::getMaxGpuLengthMm, PCCase::setMaxGpuLengthMm);
         mergeNumber(other, PCCase::getMaxCpuCoolerHeightMm, PCCase::setMaxCpuCoolerHeightMm);
+        mergeSet(other, PCCase::getColors, PCCase::setColors);
     }
 
     @Enumerated(EnumType.STRING)
@@ -56,6 +58,11 @@ public class PCCase extends HardwareSpec<PCCase> {
 
     @PositiveOrZero
     private double maxCpuCoolerHeightMm = 0;
+
+    @ElementCollection
+    @CollectionTable(name = "pccase_color", joinColumns = @JoinColumn(name = "pccase_id"))
+    @Column(name = "color", nullable = false)
+    private Set<String> colors = new HashSet<>();
 
     public static HardwareTypes.CaseSizeClass classify(DimensionsMm d) {
         double height = d.getHeight();

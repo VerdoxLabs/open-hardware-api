@@ -25,6 +25,7 @@ public class CPU extends HardwareSpec<CPU> {
         super.merge(other);
         mergeEnum(other, CPU::getSocket, CPU::setSocket, HardwareTypes.CpuSocket.UNKNOWN);
         mergeString(other, CPU::getIntegratedGraphics, CPU::setIntegratedGraphics);
+        mergeString(other, CPU::getCodeName, CPU::setCodeName);
         mergeNumber(other, CPU::getCores, CPU::setCores);
         mergeNumber(other, CPU::getEfficiencyCores, CPU::setEfficiencyCores);
         mergeNumber(other, CPU::getPerformanceCores, CPU::setPerformanceCores);
@@ -43,6 +44,9 @@ public class CPU extends HardwareSpec<CPU> {
     private HardwareTypes.CpuSocket socket = HardwareTypes.CpuSocket.UNKNOWN;
 
     private String integratedGraphics = "Not available";
+
+    @Column(name = "code_name")
+    private String codeName = "";
 
     @PositiveOrZero
     @Column(nullable = false)
@@ -93,6 +97,7 @@ public class CPU extends HardwareSpec<CPU> {
                 ", tdpWatts=" + tdpWatts +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
+                ", codeName='" + codeName + '\'' +
                 ", EAN='" + EANs + '\'' +
                 ", MPN='" + MPNs + '\'' +
                 ", socket=" + socket +

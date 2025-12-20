@@ -18,6 +18,7 @@
         <module>client</module>
         <module>server</module>
         <module>spring-db</module>
+<!--        <module>thirdparty/amazon-paapi</module>-->
     </modules>
     <url/>
     <licenses>
@@ -70,6 +71,11 @@
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
             <version>4.23.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.11.0</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

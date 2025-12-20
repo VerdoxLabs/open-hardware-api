@@ -1,4 +1,4 @@
-package de.verdox.hwapi.priceapi.io.ebay;
+package de.verdox.hwapi.client.ebay;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;

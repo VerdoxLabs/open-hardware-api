@@ -70,6 +70,9 @@ public class HardwareTypes {
         sWRX1, sWRX2, sWRX3, sWRX4, sWRX5, sWRX6, sWRX7, sWRX8,
 
         // AMD
+        AM3(),
+        AM3_PLUS("AM3+"),
+
         AM4(Chipset.A300, Chipset.A320, Chipset.B350, Chipset.X370, Chipset.B450, Chipset.X470, Chipset.A520, Chipset.B550, Chipset.X570, Chipset.X570S),
 
         AM5(Chipset.A620, Chipset.B650, Chipset.B650E, Chipset.X670, Chipset.X670E, Chipset.B840, Chipset.B850, Chipset.X870, Chipset.X870E),
@@ -83,19 +86,31 @@ public class HardwareTypes {
 
         LGA1151(Chipset.H110, Chipset.B150, Chipset.Q150, Chipset.H170, Chipset.Q170, Chipset.Z170, Chipset.B250, Chipset.Q250, Chipset.H270, Chipset.Q270, Chipset.Z270, Chipset.H310, Chipset.H310C, Chipset.B360, Chipset.B365, Chipset.H370, Chipset.Q370, Chipset.Z370, Chipset.Z390),
 
+        LGA1155(),
+        LGA1156(),
+
         LGA1200(Chipset.H410, Chipset.B460, Chipset.H470, Chipset.Q470, Chipset.Z490, Chipset.H510, Chipset.B560, Chipset.H570, Chipset.Z590, Chipset.W580),
 
         LGA1700(Chipset.H610, Chipset.B660, Chipset.H670, Chipset.Z690, Chipset.W680, Chipset.H710, Chipset.B760, Chipset.H770, Chipset.Z790),
 
         LGA1744(), LGA1851(), BGA1744(), BGA1964(), BGA2551(), BGA2049(), BGA2114(), BGA2833(), BGA1792(), BGA1781(), LGA1449(), BGA1787(), BGA1528(), UTBGA1377(), BGA1440(), BGA1526(),
 
+        LGA1366,LGA2066,
+
+        STRX4,
         STR5(),
         ;
 
+        private final String name;
         private final Set<Chipset> chipsets;
 
-        CpuSocket(Chipset... chipsets) {
+        CpuSocket(String name, Chipset... chipsets) {
+            this.name = !name.isBlank() ? name : name();
             this.chipsets = Set.of(chipsets);
+        }
+
+        CpuSocket(Chipset... chipsets) {
+            this("", chipsets);
         }
     }
 
@@ -156,7 +171,7 @@ public class HardwareTypes {
     public enum CaseSizeClass {UNKNOWN, MINI_ITX, MICRO_ATX, MID_TOWER, FULL_TOWER}
 
     @JsonFormat(shape = JsonFormat.Shape.STRING)
-    public enum VRAM_TYPE {UNKNOWN, GDDR, GDDR2, GDDR3, GDDR4, GDDR5, GDDR5X, GDDR6, GDDR6X, HBM1, HBM2, HBM3, HBM2E, LPDDR5, DDR5, DDR4}
+    public enum VRAM_TYPE {UNKNOWN, GDDR, GDDR2, GDDR3, GDDR4, GDDR5, GDDR5X, GDDR6, GDDR6X, GDDR7, HBM1, HBM2, HBM3, HBM2E, LPDDR5, DDR5, DDR4}
 
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum PowerConnectorType {

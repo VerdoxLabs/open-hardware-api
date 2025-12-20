@@ -32,11 +32,11 @@ public class USBPort {
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
         USBPort usbPort = (USBPort) o;
-        return type == usbPort.type && version == usbPort.version && Objects.equals(quantity, usbPort.quantity);
+        return type == usbPort.type && version == usbPort.version;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(type, version, quantity);
+        return Objects.hash(type, version);
     }
 }

@@ -1,4 +1,4 @@
-package de.verdox.hwapi.priceapi.io.ebay.api;
+package de.verdox.hwapi.client.ebay;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -89,6 +89,7 @@ public class EbayDeveloperAPIClient {
         String pathAndQuery = request.buildUrl().replace(rootUri, "");
         Map<String, String> headers = request.buildHeaders(bearerToken);
 
+
         return webClient.get()
                 .uri(pathAndQuery)
                 .headers(h -> headers.forEach(h::add))
@@ -100,7 +101,7 @@ public class EbayDeveloperAPIClient {
                     long resetEpoch = 0L;
                     try { if (rem != null) remaining = Integer.parseInt(rem); } catch (Exception ignored) {}
                     try { if (reset != null) resetEpoch = Long.parseLong(reset); } catch (Exception ignored) {}
-                    return new EbaySearchResult(status, body, remaining, resetEpoch);
+                    return new EbaySearchResult(request.marketplace, status, body, remaining, resetEpoch);
                 }));
     }
 
@@ -176,12 +177,14 @@ public class EbayDeveloperAPIClient {
     }
 
     public static final class EbaySearchResult {
+        public final EbayMarketplace ebayMarketplace;
         public final int statusCode;
         public final String body;
         public final int rateLimitRemaining;
         public final long rateLimitResetEpoch;
 
-        public EbaySearchResult(int statusCode, String body, int rateLimitRemaining, long rateLimitResetEpoch) {
+        public EbaySearchResult(EbayMarketplace ebayMarketplace, int statusCode, String body, int rateLimitRemaining, long rateLimitResetEpoch) {
+            this.ebayMarketplace = ebayMarketplace;
             this.statusCode = statusCode;
             this.body = body;
             this.rateLimitRemaining = rateLimitRemaining;

@@ -3,6 +3,7 @@ package de.verdox.hwapi.hardwareapi.component.service;
 import de.verdox.hwapi.component.repository.*;
 import de.verdox.hwapi.io.api.ComponentWebScraper;
 import de.verdox.hwapi.model.*;
+import de.verdox.hwapi.productidregistry.ProductRegistryService;
 import de.verdox.hwapi.util.GpuRegexParser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Example;
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -28,10 +30,11 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
     private final Map<Class<? extends HardwareSpec<?>>, HardwareSpecificRepo<? extends HardwareSpec<?>>> repoByType = new HashMap<>();
     private final Set<String> validTypes;
+    private final ProductRegistryService productRegistryService;
 
 
     @Autowired
-    public HardwareSpecService(HardwareSpecRepository baseRepo, CPURepository cpuRepository, CPUCoolerRepository cpuCoolerRepository, GPUChipRepository gpuChipRepository, GPURepository gpuRepository, MotherboardRepository motherboardRepository, PCCaseRepository pcCaseRepository, PSURepository psuRepository, RAMRepository ramRepository, StorageRepository storageRepository, DisplayRepository displayRepository) {
+    public HardwareSpecService(HardwareSpecRepository baseRepo, CPURepository cpuRepository, CPUCoolerRepository cpuCoolerRepository, GPUChipRepository gpuChipRepository, GPURepository gpuRepository, MotherboardRepository motherboardRepository, PCCaseRepository pcCaseRepository, PSURepository psuRepository, RAMRepository ramRepository, StorageRepository storageRepository, DisplayRepository displayRepository, ProductRegistryService productRegistryService) {
         this.baseRepo = baseRepo;
         this.gpuChipRepository = gpuChipRepository;
 
@@ -48,6 +51,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
         normalizedManufacturers.addAll(baseRepo.findAllManufacturersNormalized());
         this.validTypes = HardwareTypeUtil.getSupportedSpecTypes().stream().map(Class::getSimpleName).map(String::toLowerCase).collect(Collectors.toSet());
+        this.productRegistryService = productRegistryService;
     }
 
     public Class<? extends HardwareSpec<?>> getType(String type) {
@@ -72,7 +76,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         // Schritt 1: IDs holen
         Page<Long> idPage = repo.findPageIds(pageable);
         if (idPage.isEmpty()) {
-            return new PageImpl<>(List.of(), pageable, 0);
+            return new PageImpl<>(new ArrayList<>(), pageable, 0);
         }
 
         List<HARDWARE> items = repo.findAllByIdInOrderByIdAsc(idPage.getContent());
@@ -99,6 +103,22 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         if (repository == null) return null;
 
         return repository.findAll(example).getFirst();
+    }
+
+    @Transactional(readOnly = true)
+    public long countAllHardware() {
+        // robust ohne baseRepo.count() (falls Vererbung/Repo-Setup tricky):
+        // return findAll().size();
+        return baseRepo.count();
+    }
+
+    @Transactional
+    public void deleteAllHardwareData() {
+        // Subtype-Repos zuerst (sicher bei FK/JoinTables), dann baseRepo
+        for (var repo : repoByType.values()) {
+            repo.deleteAll();
+        }
+        baseRepo.deleteAll();
     }
 
     @Transactional(readOnly = true)
@@ -219,24 +239,27 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             throw new IllegalArgumentException("hardwareSpec darf nicht null sein");
         }
 
-        // Model normalisieren (Trim + Mehrfachspaces zu einem Space)
         String normalizedModel = normalizeModel(hardwareSpec.getModel());
-        if (normalizedModel == null || normalizedModel.isBlank()) {
-            throw new IllegalArgumentException("Hardware model cannot be null.");
+        if (hardwareSpec.getModel() == null || hardwareSpec.getModel().isBlank() || normalizedModel == null || normalizedModel.isBlank()) {
+            ScrapingService.LOGGER.log(Level.FINE, "Hardware model cannot be null.");
+            return false;
         }
 
         hardwareSpec.setModel(normalizedModel);
+
 
         if (hardwareSpec.getManufacturer() == null || hardwareSpec.getManufacturer().isBlank()) {
             hardwareSpec.setManufacturer(getAllKnownManufacturers().stream().filter(s -> normalizedModel.toLowerCase().contains(s)).findAny().orElse(null));
         }
 
         if (hardwareSpec.getMPNs().isEmpty()) {
-            throw new IllegalArgumentException("Hardware mpn cannot be null for " + hardwareSpec.getModel());
+            ScrapingService.LOGGER.log(Level.FINE, "Hardware mpn cannot be null for " + hardwareSpec.getModel());
+            return false;
         }
 
         if (hardwareSpec.getManufacturer() == null || hardwareSpec.getManufacturer().isBlank()) {
-            throw new IllegalArgumentException("Hardware manufacturer cannot be null for " + hardwareSpec.getModel());
+            ScrapingService.LOGGER.log(Level.FINE, "Hardware manufacturer cannot be null for " + hardwareSpec.getModel());
+            return false;
         }
 
 
@@ -283,6 +306,10 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             }
         }
 
+        if(!sanitizeBeforeSave(incoming)) {
+            return;
+        }
+
         baseRepo.save(target);
         saveWithSpecificRepo(target);
     }
@@ -305,10 +332,10 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
         for (HardwareSpec<?> incoming : incomingSet) {
             if (incoming.getEANs() != null) {
-                allEans.addAll(incoming.getEANs());
+                allEans.addAll(incoming.getEANs().stream().map(HardwareSpec::normalizeEan).collect(Collectors.toSet()));
             }
             if (incoming.getMPNs() != null) {
-                allMpns.addAll(incoming.getMPNs());
+                allMpns.addAll(incoming.getMPNs().stream().map(HardwareSpec::normalizeMpn).collect(Collectors.toSet()));
             }
         }
 
@@ -317,8 +344,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
         // 3) Einmalig alle existierenden Matches laden
         List<HardwareSpec<?>> existingMatches = (hasEans || hasMpns)
-                ? baseRepo.findAllByAnyEanOrMpnIn(allEans, allMpns, hasEans, hasMpns)
-                : List.of();
+                ? baseRepo.findAllByAnyEanOrMpnInOrModel(allEans, allMpns, hasEans, hasMpns)
+                : new ArrayList<>();
 
         // 4) Index im Speicher aufbauen: EAN/MPN → bestehendes HardwareSpec
         Map<String, HardwareSpec<?>> byEan = new HashMap<>();
@@ -351,10 +378,16 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             if (target == null) {
                 // Kein Match in DB oder im Index → neues Objekt
                 target = incoming;
+                if (!sanitizeBeforeSave(target)) {
+                    continue;
+                }
                 toPersist.add(target);
             } else {
                 // Gefundenes Target → mergen
                 target.tryMerge(incoming);
+                if (!sanitizeBeforeSave(target)) {
+                    continue;
+                }
             }
 
             // Index aktualisieren, falls neue EANs/MPNs hinzugekommen sind
@@ -370,7 +403,6 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             }
         }
 
-        // 6) Persistieren (generisch + spezifische Repos)
         baseRepo.saveAll(toPersist);
         for (HardwareSpec<?> spec : toPersist) {
             saveWithSpecificRepo(spec);
@@ -383,29 +415,36 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             Map<String, HardwareSpec<?>> byEan,
             Map<String, HardwareSpec<?>> byMpn
     ) {
-        // Zuerst über EANs versuchen
+        HardwareSpec<?> anyMatch = null;
+
+        // 1) Über EANs
         if (incoming.getEANs() != null) {
             for (String ean : incoming.getEANs()) {
                 HardwareSpec<?> candidate = byEan.get(ean);
-                if (candidate != null && candidate.getClass().equals(incoming.getClass())) {
-                    return candidate;
+                if (candidate != null) {
+                    if (candidate.getClass().equals(incoming.getClass())) {
+                        return candidate; // best case
+                    }
+                    if (anyMatch == null) anyMatch = candidate; // fallback merken
                 }
             }
         }
 
-        // Dann über MPNs versuchen
+        // 2) Über MPNs
         if (incoming.getMPNs() != null) {
             for (String mpn : incoming.getMPNs()) {
                 HardwareSpec<?> candidate = byMpn.get(mpn);
-                if (candidate != null && candidate.getClass().equals(incoming.getClass())) {
-                    return candidate;
+                if (candidate != null) {
+                    if (candidate.getClass().equals(incoming.getClass())) {
+                        return candidate; // best case
+                    }
+                    if (anyMatch == null) anyMatch = candidate; // fallback merken
                 }
             }
         }
 
-        // Wenn kein Typ-exaktes Match gefunden wurde, kannst du – wie in deiner Methode –
-        // bei Bedarf noch einen "irgendein Match" Fallback implementieren.
-        return null;
+        // 3) Fallback wie saveHardware()
+        return anyMatch;
     }
 
 
@@ -479,7 +518,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     public <HARDWARE extends HardwareSpec<HARDWARE>> List<HARDWARE> mergeAll(Class<HARDWARE> clazz, Collection<HARDWARE> input) {
         HardwareSpecificRepo<HARDWARE> repo = getRepo(clazz);
         if (repo == null) {
-            return List.copyOf(input);
+            return new ArrayList<>(input);
         }
 
         Set<String> eans = new HashSet<>(), mpns = new HashSet<>();
@@ -576,7 +615,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
     @Override
     @Transactional
-    public void onScrapeMulti(Set<HardwareSpec<?>> scrapedHardware) {
+    public void onScrapeMulti(Set<? extends HardwareSpec<?>> scrapedHardware) {
         LOGGER.info("\tSaving " + scrapedHardware.size() + " hardware specs to database");
         long start = System.currentTimeMillis();
         try {

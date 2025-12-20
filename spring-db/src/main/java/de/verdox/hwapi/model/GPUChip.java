@@ -35,7 +35,7 @@ public class GPUChip extends HardwareSpec<GPUChip> {
         mergeNumber(other, GPUChip::getVramGb, GPUChip::setVramGb);
         mergeNumber(other, GPUChip::getLengthMm, GPUChip::setLengthMm);
         mergeNumber(other, GPUChip::getTdp, GPUChip::setTdp);
-        mergeSet(other, GPUChip::getPowerConnectors);
+        mergeSet(other, GPUChip::getPowerConnectors,  GPUChip::setPowerConnectors);
     }
 
     private String canonicalModel;

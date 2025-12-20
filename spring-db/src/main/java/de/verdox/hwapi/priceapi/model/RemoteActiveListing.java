@@ -1,16 +1,12 @@
 package de.verdox.hwapi.priceapi.model;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
-import de.verdox.hwapi.model.values.Currency;
-import de.verdox.hwapi.model.values.ItemCondition;
-import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-import java.math.BigDecimal;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.persistence.*;
+import lombok.*;
+
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 @Entity
@@ -27,7 +23,8 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_ral_ean", columnList = "ean"),
                 @Index(name = "idx_ral_mpn", columnList = "mpn"),
-                @Index(name = "idx_ral_ean_price", columnList = "ean,price")
+                @Index(name = "idx_ral_last_seen", columnList = "last_seen_at"),
+                @Index(name = "idx_ral_active", columnList = "still_active")
         }
 )
 public class RemoteActiveListing {
@@ -35,6 +32,14 @@ public class RemoteActiveListing {
     @Id
     @GeneratedValue
     private UUID uuid;
+
+    @Enumerated(EnumType.STRING)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @Column(name = "primary_region", nullable = false)
+    private ListingEnums.Country primaryRegion;
+
+    @Column(name = "market_place_name", nullable = false)
+    private String marketPlaceName;
 
     @Column(name = "market_place_domain", nullable = false)
     private String marketPlaceDomain;
@@ -51,27 +56,14 @@ public class RemoteActiveListing {
     @Column(name = "title")
     private String title;
 
+    @Column(name = "product_manufacturer")
+    private String productManufacturer;
+
     @Column(name = "item_url", length = 1000)
     private String itemUrl;
 
-    @Column(name = "price", precision = 18, scale = 2)
-    private BigDecimal price;
-
-    @Enumerated(EnumType.STRING)
-    @JsonFormat(shape = JsonFormat.Shape.STRING)
-    @Column(name = "currency")
-    private Currency currency;
-
-    @Enumerated(EnumType.STRING)
-    @JsonFormat(shape = JsonFormat.Shape.STRING)
-    @Column(name = "condition")
-    private ItemCondition condition;
-
-    @Column(name = "shipping_price", precision = 18, scale = 2)
-    private BigDecimal shippingPrice;
-
-    @Column(name = "available_quantity")
-    private Integer availableQuantity;
+    @Column(name = "merchant_image_url", length = 1000)
+    private String merchantImageUrl;
 
     @Column(name = "first_seen_at", nullable = false)
     private Instant firstSeenAt;
@@ -92,5 +84,23 @@ public class RemoteActiveListing {
     @PreUpdate
     public void onUpdate() {
         lastSeenAt = Instant.now();
+    }
+
+    @Override
+    public String toString() {
+        return "RemoteActiveListing{" +
+                "uuid=" + uuid +
+                ", marketPlaceDomain='" + marketPlaceDomain + '\'' +
+                ", marketPlaceItemID='" + marketPlaceItemID + '\'' +
+                ", ean='" + ean + '\'' +
+                ", mpn='" + mpn + '\'' +
+                ", title='" + title + '\'' +
+                ", productManufacturer='" + productManufacturer + '\'' +
+                ", itemUrl='" + itemUrl + '\'' +
+                ", merchantImageUrl='" + merchantImageUrl + '\'' +
+                ", firstSeenAt=" + firstSeenAt +
+                ", lastSeenAt=" + lastSeenAt +
+                ", stillActive=" + stillActive +
+                '}';
     }
 }

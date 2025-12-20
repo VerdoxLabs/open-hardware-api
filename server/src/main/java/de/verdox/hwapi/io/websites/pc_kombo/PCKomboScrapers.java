@@ -101,7 +101,9 @@ public class PCKomboScrapers {
 
                             target.setM2Slots(m2Slots);
                             target.setPcieSlots(pcieSlots);
-                            target.setUsbPort(usbPort);
+                            for (USBPort port : usbPort) {
+                                target.addOrMerge(port);
+                            }
                             target.setUsb3Headers(Math.toIntExact(parseFirstInt("USB 3 Headers", specs)));
                         },
                         "https://www.pc-kombo.com/us/components/motherboards"))

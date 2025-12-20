@@ -16,3 +16,6 @@ spring:
       path: /h2-console
   flyway:
     enabled: false
+    locations: classpath:db/h2
+
+logging.level.de.verdox.hwapi.hardwareapi.component.service.ScrapingService: DEBUG

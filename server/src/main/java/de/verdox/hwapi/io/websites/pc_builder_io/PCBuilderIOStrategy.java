@@ -3,7 +3,11 @@ package de.verdox.hwapi.io.websites.pc_builder_io;
 import de.verdox.hwapi.io.api.WebsiteScrapingStrategy;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.openqa.selenium.*;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
 
+import java.time.Duration;
 import java.util.*;
 
 public class PCBuilderIOStrategy implements WebsiteScrapingStrategy {
@@ -16,11 +20,17 @@ public class PCBuilderIOStrategy implements WebsiteScrapingStrategy {
 
                 if (pageLink.hasAttr("rel") && pageLink.hasAttr("href") && pageLink.attr("rel").equals("next")) {
                     multiPageURLs.offer(new MultiPageCandidate(pageLink.attr("href")));
-                    break;
                 }
             }
         }
     }
+
+    @Override
+    public Duration cacheTTLForMultiPages() {
+        return Duration.ofDays(1);
+    }
+
+
 
     @Override
     public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
@@ -50,18 +60,17 @@ public class PCBuilderIOStrategy implements WebsiteScrapingStrategy {
 
         var header = document.selectFirst("div.product-wrapper.d-flex.align-items-center.justify-content-between");
 
-        if(header != null) {
+        if (header != null) {
             for (Element img : header.select("img")) {
-                if(img.attr("src").startsWith("http")) {
+                if (img.attr("src").startsWith("http")) {
                     String attr = img.attr("src");
-                    if(attr.endsWith(".jpg") && attr.contains("/images/")) {
+                    if (attr.endsWith(".jpg") && attr.contains("/images/")) {
                         specs.put("img", List.of(attr));
                         break;
                     }
                 }
             }
         }
-
 
 
         for (Element element : document.select("div.spec-variant-boxes.spec-table")) {

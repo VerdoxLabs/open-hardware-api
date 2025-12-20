@@ -220,7 +220,7 @@ public class WebsiteScraper {
                                 return Optional.of(hw);
                             }
                         } catch (Throwable e) {
-                            ScrapingService.LOGGER.log(Level.SEVERE, "The " + mainEntry.subId + " scraper for " + domain + " produced an invalid hardware object [" + scrapedSpecs.url() + "] with [" + scrapedSpecs.specs() + "] (" + seleniumBasedWebScraper.getPathInCache(domain, scrapedSpecs.url()) + ")", e);
+                            ScrapingService.LOGGER.log(Level.SEVERE, "The " + mainEntry.subId + " scraper for " + domain + " produced an invalid hardware object [" + scrapedSpecs.urls() + "] with [" + scrapedSpecs.specs() + "] (" + seleniumBasedWebScraper.getPathInCache(domain, scrapedSpecs.urls().stream().findFirst().get()) + ")", e);
 
                         }
                         return Optional.empty();

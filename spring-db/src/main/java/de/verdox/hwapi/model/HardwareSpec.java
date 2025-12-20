@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.NaturalId;
 
+import java.text.Normalizer;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.function.BiConsumer;
@@ -24,7 +25,6 @@ import java.util.function.Predicate;
 @Setter
 public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     @Id
-    @JsonIgnore
     @GeneratedValue(strategy = GenerationType.AUTO)
     private long id;
 
@@ -34,6 +34,11 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
 
     @NotBlank
     protected String model;
+
+    @Transient
+    public String displayName() {
+        return  manufacturer + " " + model;
+    }
 
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(
@@ -63,7 +68,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
             joinColumns = @JoinColumn(name = "spec_id")
     )
     @Column(name = "url", nullable = false, length = 1024)
-    protected List<String> pictureUrls = new ArrayList<>();
+    protected Set<String> pictureUrls = new HashSet<>();
 
     protected LocalDate launchDate;
 
@@ -78,7 +83,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         if (mpn == null || mpn.isEmpty()) {
             return;
         }
-        this.MPNs.add(mpn);
+        this.MPNs.add(normalizeMpn(mpn));
     }
 
     // Mini-Helper
@@ -90,11 +95,50 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         return (t.length() == 13 || t.length() == 14) ? t : null;
     }
 
+    public static String normalizeMpn(String mpn) {
+        if (mpn == null) return null;
+
+        return Normalizer.normalize(mpn, Normalizer.Form.NFKC)
+                .trim()
+                .replace('\u00A0', ' ')
+                .toUpperCase(Locale.ROOT);
+    }
+
+
     public abstract void checkIfLegal();
 
     @PrePersist
     public void sanitizeNumbers() {
-        setEANs(this.EANs);
+        var modelBefore = getModel();
+        sanitize();
+
+        var eansCopy = new HashSet<>(this.EANs);
+        var mpnsCopy = new HashSet<>(this.MPNs);
+
+        this.EANs = new HashSet<>();
+        this.MPNs = new HashSet<>();
+
+        for (String ean : eansCopy) {
+            addEAN(ean);
+        }
+
+        for (String mpn : mpnsCopy) {
+            addMPN(mpn);
+        }
+
+        setModel(
+                getModel()
+                        .replace(getManufacturer(), "")
+                        .replace(getClass().getSimpleName(), "")
+        );
+
+        if(getModel().isBlank()) {
+            setModel(modelBefore);
+        }
+    }
+
+    public void sanitize() {
+
     }
 
     @JsonIgnore
@@ -111,7 +155,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
 
     public String displayMPNs() {
         StringBuilder stringBuilder = new StringBuilder();
-        for (String s : getMpnsSorted()) {
+        for (String s : getMPNs()) {
             if (!stringBuilder.isEmpty()) {
                 stringBuilder.append(", ");
             }
@@ -122,7 +166,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
 
     public String displayEANs() {
         StringBuilder stringBuilder = new StringBuilder();
-        for (String s : getEansSorted()) {
+        for (String s : getEANs()) {
             if (!stringBuilder.isEmpty()) {
                 stringBuilder.append(", ");
             }
@@ -138,16 +182,9 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     }
 
     public void merge(SELF other) {
-        mergeSet(other, HardwareSpec::getEANs);
-        mergeSet(other, HardwareSpec::getMPNs);
-        getPictureUrls().clear();
-        merge(other, HardwareSpec::getPictureUrls, (self, strings) -> {
-            for (String string : strings) {
-                if(!self.getPictureUrls().contains(string)) {
-                    self.getPictureUrls().add(string);
-                }
-            }
-        }, List::isEmpty);
+        mergeSet(other, HardwareSpec::getEANs, HardwareSpec::setEANs);
+        mergeSet(other, HardwareSpec::getMPNs, HardwareSpec::setMPNs);
+        mergeSet(other, HardwareSpec::getPictureUrls, HardwareSpec::setPictureUrls);
         mergeString(other, HardwareSpec::getModel, HardwareSpec::setModel);
         mergeString(other, HardwareSpec::getManufacturer, HardwareSpec::setManufacturer);
         merge(other, HardwareSpec::getLaunchDate, HardwareSpec::setLaunchDate, Objects::isNull);
@@ -173,8 +210,10 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         getter.apply(self()).addAll(getter.apply(other));
     }
 
-    public final <INPUT> void mergeSet(SELF other, Function<SELF, Set<INPUT>> getter) {
-        getter.apply(self()).addAll(getter.apply(other));
+    public final <INPUT> void mergeSet(SELF other, Function<SELF, Set<INPUT>> getter, BiConsumer<SELF, Set<INPUT>> setter) {
+        Set<INPUT> set = new HashSet<>(getter.apply(self()));
+        set.addAll(getter.apply(other));
+        setter.accept(self(), set);
     }
 
     public final <INPUT> void merge(SELF other, Function<SELF, INPUT> getter, BiConsumer<SELF, INPUT> setter, Predicate<INPUT> isStandardValue) {

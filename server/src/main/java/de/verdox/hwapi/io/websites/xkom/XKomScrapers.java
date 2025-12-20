@@ -14,7 +14,7 @@ public class XKomScrapers {
         return new WebsiteScraper(service, "x-kom.de")
                 .withStrategy(new XKomScrapingStrategy())
                 .withShouldSavePredicate((s, document) -> {
-                    return document.selectFirst("div.page-wrapper") != null;
+                    return document.selectFirst("div.pages-wrapper") != null;
                 })
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {
                     var specs = scrapedSpecs.specs();

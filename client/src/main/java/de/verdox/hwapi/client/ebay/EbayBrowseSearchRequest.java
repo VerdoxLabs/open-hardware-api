@@ -1,4 +1,4 @@
-package de.verdox.hwapi.priceapi.io.ebay.api;
+package de.verdox.hwapi.client.ebay;
 
 import de.verdox.hwapi.model.HardwareSpec;
 
@@ -31,7 +31,7 @@ public final class EbayBrowseSearchRequest {
     private final Integer offset;               // optional
     private final List<String> fieldGroups;     // optional (z.B. EXTENDED)
     private final List<String> extraFilters;    // optional (z.B. price:[..])
-    private final EbayMarketplace marketplace;  // Pflicht (für Header)
+    public final EbayMarketplace marketplace;  // Pflicht (für Header)
 
     private EbayBrowseSearchRequest(Builder b) {
         this.q = b.q;

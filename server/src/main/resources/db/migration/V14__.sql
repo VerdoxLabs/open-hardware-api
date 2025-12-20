@@ -1,0 +1,1 @@
+ALTER TABLE remote_active_listing ADD COLUMN IF NOT EXISTS primary_region VARCHAR(255) NOT NULL DEFAULT '';

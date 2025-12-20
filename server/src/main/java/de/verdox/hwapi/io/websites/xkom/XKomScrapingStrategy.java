@@ -31,7 +31,7 @@ public class XKomScrapingStrategy implements WebsiteScrapingStrategy {
     public Map<String, List<String>> extractSpecMap(Document page) throws Throwable {
         Map<String, List<String>> specs = new HashMap<>();
 
-        var header = page.selectFirst("div.page-title-wrapper.product");
+        var header = page.selectFirst("div.pages-title-wrapper.product");
         if (header != null) {
             specs.put("model", List.of(header.selectFirst("span.base").text()));
         }

@@ -1,4 +1,4 @@
-package de.verdox.hwapi.priceapi.io.ebay.api;
+package de.verdox.hwapi.client.ebay;
 
 import de.verdox.hwapi.model.*;
 import lombok.Getter;

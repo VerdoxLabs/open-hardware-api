@@ -33,9 +33,65 @@ public class ScrapeParser<HARDWARE extends HardwareSpec> {
         return this;
     }
 
-    public <INPUT extends Number> ScrapeParser<HARDWARE> parseNumber(String key, Function<String, INPUT> dataParser, Function<HARDWARE, INPUT> getter, BiConsumer<HARDWARE, INPUT> setter, INPUT defaultValue) {
-        consumers.add(hardware -> parse(hardware, key, raw -> dataParser.apply(raw.replaceAll("[^0-9-]", "")), getter, setter, defaultValue));
+    public <INPUT extends Number> ScrapeParser<HARDWARE> parseNumber(
+            String key,
+            Function<String, INPUT> dataParser,
+            Function<HARDWARE, INPUT> getter,
+            BiConsumer<HARDWARE, INPUT> setter,
+            INPUT defaultValue
+    ) {
+        consumers.add(hardware -> parse(
+                hardware,
+                key,
+                raw -> {
+                    if (raw == null) return null;
+
+                    String normalized = normalizeNumber(raw);
+                    if (normalized.isBlank()) return null;
+
+                    return dataParser.apply(normalized);
+                },
+                getter,
+                setter,
+                defaultValue
+        ));
         return this;
+    }
+
+    private static String normalizeNumber(String raw) {
+        String s = raw.trim();
+
+        // Entferne alles außer Ziffern, Punkt, Komma, Minus
+        s = s.replaceAll("[^0-9.,-]", "");
+
+        if (s.isBlank()) return "";
+
+        // Fall: sowohl . als auch , vorhanden → letztes ist Dezimaltrenner
+        int lastDot = s.lastIndexOf('.');
+        int lastComma = s.lastIndexOf(',');
+
+        if (lastDot >= 0 && lastComma >= 0) {
+            if (lastDot > lastComma) {
+                // 1,234.56 → entferne Kommas
+                s = s.replace(",", "");
+            } else {
+                // 1.234,56 → entferne Punkte, Komma → Punkt
+                s = s.replace(".", "").replace(",", ".");
+            }
+        } else if (lastComma >= 0) {
+            // nur Komma → Dezimalpunkt
+            s = s.replace(",", ".");
+        }
+        // sonst: nur Punkt oder nur Zahl → ok
+
+        // Sicherheitsnetz: nur eine Dezimalstelle behalten
+        int firstDot = s.indexOf('.');
+        if (firstDot >= 0) {
+            s = s.substring(0, firstDot + 1)
+                    + s.substring(firstDot + 1).replace(".", "");
+        }
+
+        return s;
     }
 
 

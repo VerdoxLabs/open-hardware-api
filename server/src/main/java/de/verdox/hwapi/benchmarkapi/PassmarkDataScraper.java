@@ -56,7 +56,13 @@ public class PassmarkDataScraper {
             return;
         }
         for (Element tr : tBody.select("tr")) {
-            String modelName = tr.selectFirst("a").text();
+            String modelName = tr.selectFirst("a").text()
+                    .replace("Radeon", "")
+                    .replace("NVIDIA", "")
+                    .replace("RADEON", "")
+                    .replace("Nvidia", "")
+                    .replace("Intel", "")
+                    .replace("GeForce", "");
             Elements elements = tr.select("td");
             double g3DMark = tryParseNumberSafe(elements.get(2).text());
             double g2DMark = tryParseNumberSafe(elements.get(3).text());

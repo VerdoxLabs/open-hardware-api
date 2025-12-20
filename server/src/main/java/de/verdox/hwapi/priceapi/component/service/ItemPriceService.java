@@ -4,25 +4,27 @@ import de.verdox.hwapi.client.PriceSeriesDTO;
 import de.verdox.hwapi.client.PriceSeriesResponseDTO;
 import de.verdox.hwapi.hardwareapi.component.service.HardwareSpecService;
 import de.verdox.hwapi.model.HardwareSpec;
-import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.model.values.ItemCondition;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayCategory;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayMarketplace;
-import de.verdox.hwapi.priceapi.model.PriceLookupBlock;
-import de.verdox.hwapi.priceapi.model.RemoteActiveListing;
+import de.verdox.hwapi.priceapi.component.service.amazon.AmazonMarketplace;
+import de.verdox.hwapi.priceapi.component.service.amazon.AmazonPriceService;
+import de.verdox.hwapi.priceapi.component.service.amazon.AmazonTrackActiveListingsService;
+import de.verdox.hwapi.priceapi.component.service.ebay.EbayCompletedListingsService;
+import de.verdox.hwapi.priceapi.component.service.ebay.EbayFeedPriceService;
+import de.verdox.hwapi.priceapi.model.ListingEnums;
+import de.verdox.hwapi.priceapi.model.ListingPricePoint;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
-import de.verdox.hwapi.priceapi.repository.PriceLookupBlockRepository;
-import de.verdox.hwapi.priceapi.repository.RemoteActiveListingRepository;
+import de.verdox.hwapi.priceapi.repository.ListingPricePointRepository;
 import de.verdox.hwapi.priceapi.repository.RemoteSoldItemRepository;
+import de.verdox.hwapi.productidregistry.ProductRegistryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,15 +34,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ItemPriceService {
+
     private static final Logger LOGGER = Logger.getLogger(ItemPriceService.class.getName());
 
-    private static final Duration NEGATIVE_CACHE_DURATION = Duration.ofHours(24);
-
-    private final PriceLookupBlockRepository priceLookupBlockRepository;
-    private final RemoteActiveListingRepository remoteActiveListingRepository;
+    private final ListingPricePointRepository remoteActiveListingPriceRepository; // ✅ NEW
     private final RemoteSoldItemRepository remoteSoldItemRepository;
     private final EbayCompletedListingsService ebayCompletedListingsService;
-    private final EbayAPITrackActiveListingsService ebayAPITrackActiveListingsService;
 
     private final Map<Long, PriceSeriesResponseDTO> jobs = new ConcurrentHashMap<>();
     private final Map<Integer, PriceSeriesResponseDTO> jobsById = new ConcurrentHashMap<>();
@@ -49,8 +48,14 @@ public class ItemPriceService {
     private final ExecutorService frontFetcher = Executors.newSingleThreadExecutor();
     private final HardwareSpecService hardwareSpecService;
 
+    private final AmazonPriceService amazonPriceService;
+    private final ProductRegistryService productRegistryService;
+
+    private final AmazonTrackActiveListingsService amazonTrackActiveListingsService;
+    private final EbayFeedPriceService ebayFeedPriceService;
+
     // ------------------------------------------------------------------------
-    // DB-Fetch: Completed
+    // DB-Fetch: Completed (unverändert)
     // ------------------------------------------------------------------------
     @Transactional
     public PriceSeriesResponseDTO fetchCompletedSeriesDataFromDB(HardwareSpec<?> hardwareSpec,
@@ -80,12 +85,17 @@ public class ItemPriceService {
                                         soldItemsByCurrency.stream()
                                                 .map(remoteSoldItem ->
                                                         new PriceSeriesDTO.PricePointDTO(
+                                                                ListingEnums.Country.US,
+                                                                "",
+                                                                "",
                                                                 remoteSoldItem.getMarketPlaceDomain(),
+                                                                "",
                                                                 remoteSoldItem.getMarketPlaceItemID(),
                                                                 remoteSoldItem.getSellDate()
                                                                         .atStartOfDay()
                                                                         .toInstant(ZoneOffset.UTC),
-                                                                remoteSoldItem.getSellPrice()
+                                                                remoteSoldItem.getSellPrice(),
+                                                                remoteSoldItem.getCurrency()
                                                         )
                                                 )
                                                 .toList()
@@ -99,63 +109,65 @@ public class ItemPriceService {
     }
 
     // ------------------------------------------------------------------------
-    // DB-Fetch: Active
+    // DB-Fetch: Active (JETZT aus remote_active_listing_price)
     // ------------------------------------------------------------------------
     @Transactional
     public PriceSeriesResponseDTO fetchActiveSeriesDataFromDB(HardwareSpec<?> hardwareSpec,
                                                               Set<ItemCondition> conditions,
                                                               int monthSince) {
+
+        // conditions existieren in active-price nicht mehr (nach deiner Ansage)
+        // -> wir ignorieren 'conditions' hier bewusst, damit Signatur kompatibel bleibt.
+
         List<PriceSeriesDTO> result = new ArrayList<>();
 
-        List<RemoteActiveListing> remoteActiveListingsForSpec =
-                remoteActiveListingRepository.findPricePoints(
-                        hardwareSpec.getMPNs(),
-                        hardwareSpec.getEANs(),
-                        conditions,
-                        monthSince
-                );
+        Set<String> mpns = hardwareSpec.getMPNs() != null ? hardwareSpec.getMPNs() : Set.of("");
+        Set<String> eans = hardwareSpec.getEANs() != null ? hardwareSpec.getEANs() : Set.of("");
+        String manufacturer = hardwareSpec.getManufacturer();
 
-        remoteActiveListingsForSpec.stream()
-                .collect(Collectors.groupingBy(RemoteActiveListing::getCondition))
-                .forEach((itemCondition, listingsByCondition) -> {
-                    PriceSeriesDTO priceSeriesDTO =
-                            new PriceSeriesDTO(itemCondition, true, new LinkedHashMap<>());
+        Instant since = Instant.now().minus(monthSince * 30L, ChronoUnit.DAYS);
 
-                    listingsByCondition.stream()
-                            .collect(Collectors.groupingBy(RemoteActiveListing::getCurrency))
-                            .forEach((currency, listingsByCurrency) -> {
-                                priceSeriesDTO.prices().put(
-                                        currency,
-                                        listingsByCurrency.stream()
-                                                .map(l -> new PriceSeriesDTO.PricePointDTO(
-                                                        l.getMarketPlaceDomain(),
-                                                        l.getMarketPlaceItemID(),
-                                                        l.getFirstSeenAt(),
-                                                        l.getPrice()
-                                                ))
-                                                .toList()
-                                );
-                            });
+        List<ListingPricePoint> points = remoteActiveListingPriceRepository.findPricePoints("%"+manufacturer+"%", mpns, eans, since);
 
-                    result.add(priceSeriesDTO);
+        PriceSeriesDTO series = new PriceSeriesDTO(ItemCondition.NEW, false, new LinkedHashMap<>());
+
+        points.stream()
+                .filter(p -> p.getCurrency() != null && p.getPrice() != null)
+                .collect(Collectors.groupingBy(ListingPricePoint::getCurrency))
+                .forEach((currency, byCurrency) -> {
+                    series.prices().put(
+                            currency,
+                            byCurrency.stream()
+                                    .map(p -> new PriceSeriesDTO.PricePointDTO(
+                                            p.getListing().getPrimaryRegion(),
+                                            p.getListing().getMarketPlaceName(),
+                                            p.getListing().getItemUrl(),
+                                            p.getListing().getMerchantImageUrl(),
+                                            p.getListing().getMarketPlaceDomain(),
+                                            p.getListing().getMarketPlaceItemID(),
+                                            p.getCapturedAt(),
+                                            p.getPrice(),
+                                            p.getCurrency()
+                                    ))
+                                    .toList()
+                    );
                 });
+
+        if(!series.prices().isEmpty()) {
+            result.add(series);
+        }
 
         return new PriceSeriesResponseDTO(false, result);
     }
 
     // ------------------------------------------------------------------------
-    // Remote-Fetch (Background-Job) + Negative Cache via PriceLookupBlock
+    // Remote-Fetch (wie bei dir; aktuell auskommentiert)
     // ------------------------------------------------------------------------
     @Transactional
     public PriceSeriesResponseDTO fetchSeriesDataFromRemote(HardwareSpec<?> spec, boolean background) {
-        // 1) Abgelaufene Blocks bereinigen -> läuft im Request-Thread mit aktiver Transaktion
-        cleanupExpiredBlocks();
 
         PriceSeriesResponseDTO existing = jobs.get(spec.getId());
-        if (existing != null) {
-            // es läuft schon ein Job für diese Spec -> DTO zurückgeben
-            return existing;
-        }
+        if (existing != null) return existing;
 
         int ticketId = idCounter.incrementAndGet();
         PriceSeriesResponseDTO dto = new PriceSeriesResponseDTO(true, new CopyOnWriteArrayList<>());
@@ -163,165 +175,60 @@ public class ItemPriceService {
         jobs.put(spec.getId(), dto);
         jobsById.put(ticketId, dto);
 
-        Long specId = spec.getId();
-        @SuppressWarnings("unchecked")
-        Class<? extends HardwareSpec<?>> clazz = (Class<? extends HardwareSpec<?>>) spec.getClass();
         Set<String> eans = spec.getEANs() != null ? Set.copyOf(spec.getEANs()) : Set.of();
         Set<String> mpns = spec.getMPNs() != null ? Set.copyOf(spec.getMPNs()) : Set.of();
 
-        // 2) Async-Job auf eigenem Executor
+        String firstEan = eans.stream().findFirst().orElse(null);
+        String firstMpn = mpns.stream().findFirst().orElse(null);
+        String title = spec.getManufacturer() + " " + spec.getModel();
+
+        /*
         CompletableFuture.runAsync(() -> {
             try {
-                // Completed Listings
-                mpns.forEach(s -> ebayCompletedListingsService.fetchDataFromAllEbayMarketPlaces(s, background));
-                eans.forEach(s -> ebayCompletedListingsService.fetchDataFromAllEbayMarketPlaces(s, background));
-
-                // Active Listings
-                fetchActiveListings(eans, mpns, Set.of(Currency.EURO), EbayMarketplace.GERMANY, clazz);
-                fetchActiveListings(eans, mpns, Set.of(Currency.US_DOLLAR), EbayMarketplace.USA, clazz);
-                fetchActiveListings(eans, mpns, Set.of(Currency.CANADIAN_DOLLAR), EbayMarketplace.CANADA_EN, clazz);
-            } catch (Throwable ex) {
-                ex.printStackTrace();
+                trackEbayCompletedListings(background, mpns, eans);
+                trackEbayFeed(eans, mpns, spec.getId());
+                trackAmazonPrice(firstEan, firstMpn, title, spec.getId());
             } finally {
-                // wenn fertig: Job als beendet markieren
-                jobs.remove(specId);
+                jobs.remove(spec.getId());
             }
         }, background ? backgroundFetcher : frontFetcher);
+        */
 
         return dto;
     }
 
+    private void trackAmazonPrice(String firstEan, String firstMpn, String title, Long specId) {
+        if ((firstEan != null && !firstEan.isBlank()) || (firstMpn != null && !firstMpn.isBlank())) {
+            try {
+/*                amazonTrackActiveListingsService.enrichWithAmazonPrice(
+                        AmazonMarketplace.DE,
+                        firstEan,
+                        firstMpn,
+                        title
+                );*/
+            } catch (Exception ex) {
+                LOGGER.warning("Error enriching Amazon price for spec " + specId + ": " + ex.getMessage());
+            }
+        }
+    }
+
+    private void trackEbayCompletedListings(boolean background, Set<String> mpns, Set<String> eans) {
+        mpns.forEach(s -> ebayCompletedListingsService.fetchDataFromAllEbayMarketPlaces(s, background));
+        eans.forEach(s -> ebayCompletedListingsService.fetchDataFromAllEbayMarketPlaces(s, background));
+    }
+
+    private void trackEbayFeed(Set<String> eans, Set<String> mpns, Long specId) {
+        try {
+            if (!eans.isEmpty() || !mpns.isEmpty()) {
+                ebayFeedPriceService.trackActiveListingsByEanAndMpn(eans, mpns);
+            }
+        } catch (Exception ex) {
+            LOGGER.warning("Error fetching eBay active listings from feed for spec " + specId + ": " + ex.getMessage());
+        }
+    }
 
     public PriceSeriesResponseDTO getJobByTicketId(int ticketId) {
         return jobsById.get(ticketId);
-    }
-
-    // ------------------------------------------------------------------------
-    // Active-Listings-Remote-Fetch mit PriceLookupBlock
-    // ------------------------------------------------------------------------
-    @Transactional
-    public Map<String, List<RemoteActiveListing>> fetchActiveListings(
-            Set<String> eans,
-            Set<String> mpns,
-            Set<Currency> currencies,
-            EbayMarketplace marketplace,
-            Class<? extends HardwareSpec<?>> hardwareType
-    ) {
-        Map<String, List<RemoteActiveListing>> result = new HashMap<>();
-
-        if (eans == null) eans = Set.of();
-        if (mpns == null) mpns = Set.of();
-        if (currencies == null || currencies.isEmpty()) {
-            currencies = Set.of(Currency.EURO);
-        }
-
-        EbayCategory ebayCategory = EbayCategory.fromType(hardwareType);
-        if (ebayCategory == null) {
-            return result;
-        }
-
-        record KeyCurrency(String key, Currency currency) {
-        }
-        Set<KeyCurrency> attempted = new HashSet<>();
-        Set<KeyCurrency> gotData = new HashSet<>();
-
-        for (Currency currency : currencies) {
-
-            // 1) EANs
-            for (String ean : eans) {
-                if (ean == null || ean.isBlank()) continue;
-                String key = ean.trim();
-
-                if (isBlocked(key, currency)) {
-                    // innerhalb Block-Zeitraum -> kein neuer Ebay-Call
-                    continue;
-                }
-
-                KeyCurrency kc = new KeyCurrency(key, currency);
-                attempted.add(kc);
-
-                List<RemoteActiveListing> listings =
-                        ebayAPITrackActiveListingsService.fetchActiveBySingleIdentifier(
-                                marketplace, ebayCategory, key, null, currency
-                        );
-
-                if (!listings.isEmpty()) {
-                    gotData.add(kc);
-                    result.computeIfAbsent(key, k -> new ArrayList<>())
-                            .addAll(listings);
-                }
-            }
-
-            // 2) MPNs
-            for (String mpn : mpns) {
-                if (mpn == null || mpn.isBlank()) continue;
-                String key = mpn.trim();
-
-                if (isBlocked(key, currency)) {
-                    continue;
-                }
-
-                KeyCurrency kc = new KeyCurrency(key, currency);
-                attempted.add(kc);
-
-                List<RemoteActiveListing> listings =
-                        ebayAPITrackActiveListingsService.fetchActiveBySingleIdentifier(
-                                marketplace, ebayCategory, null, key, currency
-                        );
-
-                if (!listings.isEmpty()) {
-                    gotData.add(kc);
-                    result.computeIfAbsent(key, k -> new ArrayList<>())
-                            .addAll(listings);
-                }
-            }
-        }
-
-        // Für alle Versuche ohne Ergebnis: negative Cache-Blocks setzen
-        attempted.stream()
-                .filter(kc -> !gotData.contains(kc))
-                .forEach(kc -> createOrUpdateNegativeBlock(kc.key(), kc.currency()));
-
-        return result;
-    }
-
-    // ------------------------------------------------------------------------
-    // Helper: PriceLookupBlock
-    // ------------------------------------------------------------------------
-
-    @Transactional
-    public void cleanupExpiredBlocks() {
-        priceLookupBlockRepository.deleteByBlockedUntilBefore(Instant.now());
-    }
-
-    @Transactional(readOnly = true)
-    public boolean isBlocked(String identifier, Currency currency) {
-        Instant now = Instant.now();
-        return priceLookupBlockRepository.findByEanAndCurrency(identifier, currency)
-                .filter(block -> block.getBlockedUntil() != null &&
-                        block.getBlockedUntil().isAfter(now))
-                .isPresent();
-    }
-
-    /**
-     * Setzt/verlängert einen negativen Cache-Eintrag für (identifier, currency).
-     * Wird aufgerufen, wenn ein Ebay-Call 0 Ergebnisse gebracht hat.
-     */
-    @Transactional
-    public void createOrUpdateNegativeBlock(String identifier, Currency currency) {
-        Instant blockedUntil = Instant.now().plus(NEGATIVE_CACHE_DURATION);
-
-        PriceLookupBlock block = priceLookupBlockRepository
-                .findByEanAndCurrency(identifier, currency)
-                .orElseGet(() -> {
-                    PriceLookupBlock b = new PriceLookupBlock();
-                    b.setEan(identifier);
-                    b.setCurrency(currency);
-                    return b;
-                });
-
-        block.setBlockedUntil(blockedUntil);
-        priceLookupBlockRepository.save(block);
     }
 
     private final Set<Long> specIdsToFetch = ConcurrentHashMap.newKeySet();
@@ -334,33 +241,60 @@ public class ItemPriceService {
     @Scheduled(fixedDelayString = "${sync.flush-interval-ms:5000}")
     @Transactional
     public void runBackgroundFetcher() {
-        // Wenn noch ein Remote-Job läuft -> nichts Neues starten
-        if (!jobs.isEmpty()) {
-            return;
-        }
+        if (!jobs.isEmpty()) return;
 
-        // Einen Spec aus der Queue holen (pro Durchlauf genau einen)
         Long specId = specIdsToFetch.stream().findFirst().orElse(null);
-        if (specId == null) {
-            return;
-        }
+        if (specId == null) return;
 
-        // direkt aus der Queue entfernen, damit er nicht mehrfach abgearbeitet wird
         specIdsToFetch.remove(specId);
 
         HardwareSpec<?> found = hardwareSpecService.findById(specId);
-        if (found == null) {
-            return;
-        }
+        if (found == null) return;
 
-        // Wenn DB schon Daten hat, keinen Remote-Fetch mehr anstoßen
         PriceSeriesResponseDTO existing =
                 fetchCompletedSeriesDataFromDB(found, EnumSet.allOf(ItemCondition.class), 12);
-        if (existing.series() != null && !existing.series().isEmpty()) {
-            return;
-        }
+        if (existing.series() != null && !existing.series().isEmpty()) return;
 
         fetchSeriesDataFromRemote(found, true);
     }
-}
 
+    @Transactional(readOnly = true)
+    public long countAllPricePoints() {
+        // sold + active snapshots
+        long sold = remoteSoldItemRepository.count();
+        long active = remoteActiveListingPriceRepository.count();
+        return sold + active;
+    }
+
+    @Transactional(readOnly = true)
+    public long countTrackedListings() {
+        return remoteActiveListingPriceRepository.countDistinctListings();
+    }
+
+    @Transactional(readOnly = true)
+    public long countDistinctSpecsWithAnyPricePoints() {
+        return remoteActiveListingPriceRepository.countDistinctSpecsByEanOrMpn();
+    }
+
+    @Transactional
+    public void deleteAllPriceData() {
+        remoteActiveListingPriceRepository.deleteAll();
+        remoteSoldItemRepository.deleteAll();
+    }
+
+    @Transactional
+    public void enrichWithAmazonPrice(HardwareSpec<?> spec) {
+        String ean = spec.getEANs() != null ? spec.getEANs().stream().findFirst().orElse(null) : null;
+        String mpn = spec.getMPNs() != null ? spec.getMPNs().stream().findFirst().orElse(null) : null;
+        String title = spec.getManufacturer() + " " + spec.getModel();
+
+        if ((ean == null || ean.isBlank()) && (mpn == null || mpn.isBlank())) return;
+
+/*        amazonTrackActiveListingsService.enrichWithAmazonPrice(
+                AmazonMarketplace.DE,
+                ean,
+                mpn,
+                title
+        );*/
+    }
+}

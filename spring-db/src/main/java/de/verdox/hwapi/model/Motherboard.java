@@ -27,6 +27,23 @@ import java.util.Set;
 public class Motherboard extends HardwareSpec<Motherboard> {
 
     @Override
+    public void sanitize() {
+        setModel(getModel()
+                .replace(chipset.name(), "")
+                .replace(socket.getName(), "")
+
+                .replace("Mini ITX", "")
+                .replace("Micro ATX", "")
+                .replace("ATX", "")
+        );
+    }
+
+    @Override
+    public String displayName() {
+        return super.displayName()+" " + chipset.name()+" "+socket.getName()+" "+getFormFactor().name();
+    }
+
+    @Override
     public void merge(Motherboard other) {
         super.merge(other);
         mergeEnum(other, Motherboard::getSocket, Motherboard::setSocket, HardwareTypes.CpuSocket.UNKNOWN);
@@ -36,10 +53,11 @@ public class Motherboard extends HardwareSpec<Motherboard> {
         mergeNumber(other, Motherboard::getRamSlots, Motherboard::setRamSlots);
         mergeNumber(other, Motherboard::getRamCapacity, Motherboard::setRamCapacity);
         mergeNumber(other, Motherboard::getSataSlots, Motherboard::setSataSlots);
-        mergeSet(other, Motherboard::getM2Slots);
-        mergeSet(other, Motherboard::getPcieSlots);
-        mergeSet(other, Motherboard::getUsbPort);
+        mergeSet(other, Motherboard::getM2Slots,  Motherboard::setM2Slots);
+        mergeSet(other, Motherboard::getPcieSlots,  Motherboard::setPcieSlots);
+        mergeSet(other, Motherboard::getUsbPort,  Motherboard::setUsbPort);
         mergeNumber(other, Motherboard::getUsb3Headers, Motherboard::setUsb3Headers);
+        mergeSet(other, Motherboard::getColors, Motherboard::setColors);
     }
 
     @Enumerated(EnumType.STRING)
@@ -88,6 +106,26 @@ public class Motherboard extends HardwareSpec<Motherboard> {
 
     @PositiveOrZero
     private int usb3Headers = 0;
+
+    @ElementCollection
+    @CollectionTable(name="motherboard_color", joinColumns=@JoinColumn(name="motherboard_id"))
+    @Column(name="color", nullable=false)
+    private Set<String> colors = new HashSet<>();
+
+    public void addOrMerge(USBPort incoming) {
+        if (incoming == null) return;
+
+        for (USBPort existing : usbPort) {
+            if (existing.getType() == incoming.getType()
+                    && existing.getVersion() == incoming.getVersion()) {
+                int a = existing.getQuantity() == null ? 0 : existing.getQuantity();
+                int b = incoming.getQuantity() == null ? 0 : incoming.getQuantity();
+                existing.setQuantity(a + b); //
+                return;
+            }
+        }
+        usbPort.add(incoming);
+    }
 
     @Override
     public void checkIfLegal() {

@@ -72,14 +72,40 @@
             <version>1.17.2</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.10.0</version>
+        </dependency>
+        <dependency>
             <groupId>jakarta.validation</groupId>
             <artifactId>jakarta.validation-api</artifactId>
             <version>3.1.1</version>
+        </dependency>
+<!--        <dependency>
+            <groupId>com.amazon.paapi5</groupId>
+            <artifactId>paapi5-java-sdk</artifactId>
+            <version>1.2.4</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.squareup.okio</groupId>
+                    <artifactId>okio</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>-->
+        <dependency>
+            <groupId>com.squareup.okio</groupId>
+            <artifactId>okio</artifactId>
+            <version>1.17.4</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
             <version>3.5.6</version>
+        </dependency>
+        <dependency>
+            <groupId>com.ebay.api</groupId>
+            <artifactId>feed-sdk</artifactId>
+            <version>1.0.2.beta-RELEASE</version>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>

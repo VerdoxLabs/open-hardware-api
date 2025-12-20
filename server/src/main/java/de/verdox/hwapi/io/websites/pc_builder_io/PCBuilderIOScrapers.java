@@ -7,6 +7,10 @@ import de.verdox.hwapi.model.PCCase;
 import de.verdox.hwapi.model.values.DimensionsMm;
 import org.jsoup.nodes.Document;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.BiPredicate;
 
 import static de.verdox.hwapi.io.api.ComponentWebScraper.*;
@@ -25,7 +29,7 @@ public class PCBuilderIOScrapers {
                 .withChallengePageDetection(CHALLENGE_PREDICATE)
                 .withShouldSavePredicate(SHOULD_SAVE)
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {
-                    if(scrapedSpecs.specs().containsKey("img")) {
+                    if (scrapedSpecs.specs().containsKey("img")) {
                         hardwareSpec.getPictureUrls().addAll(scrapedSpecs.specs().get("img"));
                     }
                 })
@@ -44,7 +48,7 @@ public class PCBuilderIOScrapers {
                                         target.setThreads(target.getCores());
                                     }
                                 },
-                                "https://de.pc-builder.io/product-list/cpu"
+                                "https://de.pc-builder.io/product-list/cpu/1"
                         )
                 )
 
@@ -57,8 +61,9 @@ public class PCBuilderIOScrapers {
                                     target.setRamCapacity((int) parseFirstInt("memory max", specs));
                                     target.setRamType(extractFirstEnum(HardwareTypes.RamType.class, "memory type", specs, (s, type) -> s.contains(type.name())));
                                     target.setRamSlots((int) parseFirstInt("memory slots", specs));
+                                    target.setColors(parseColors("color", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/motherboard"
+                                "https://de.pc-builder.io/product-list/motherboard/1"
                         )
                 )
 
@@ -78,8 +83,9 @@ public class PCBuilderIOScrapers {
                                     } else {
                                         target.setModularity(HardwareTypes.PSU_MODULARITY.SEMI_MODULAR);
                                     }
+                                    target.setColors(parseColors("color", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/power-supply"
+                                "https://de.pc-builder.io/product-list/power-supply/1"
                         )
                 )
 
@@ -102,8 +108,9 @@ public class PCBuilderIOScrapers {
                                             extractEnumSet(HardwareTypes.MotherboardFormFactor.class, "motherboard form factor", specs,
                                                     (s, ff) -> s.contains(ff.name()))
                                     );
+                                    target.setColors(parseColors("color", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/case"
+                                "https://de.pc-builder.io/product-list/case/1"
                         )
                 )
 
@@ -122,11 +129,29 @@ public class PCBuilderIOScrapers {
                                                     .replace("NVIDIA", "")
                                                     .replace("GeForce", "")
                                                     .replace("AMD", "")
+                                                    .replace(((int) target.getVramGb()) + "GB", "")
+                                                    .replace(((int) target.getVramGb()) + " GB", "")
+                                                    .replace("LHR", "")
                                                     .replace("Radeon", "")
                                                     .replace("Intel ", "").trim()
                                     );
+
+                                    String newModel = target.getModel()
+                                            .replace(target.getManufacturer(), "")
+                                            .replace(target.getGpuCanonicalName(), "")
+                                            .replace(((int) target.getVramGb()) + " GB", "")
+                                            .replace(((int) target.getVramGb()) + "GB", "")
+                                            .replace("Graphics Card", "")
+                                            .replace("GeForce", "")
+                                            .replace("Radeon", "")
+                                            .replace("Arc", "")
+                                            .replace("Video Card", "");
+
+                                    target.setModel(newModel);
+                                    scraped.specs().put("model", List.of(newModel));
+                                    target.setColors(parseColors("color", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/gpu"
+                                "https://de.pc-builder.io/product-list/gpu/1"
                         )
                 )
 
@@ -140,8 +165,12 @@ public class PCBuilderIOScrapers {
                                     );
                                     int parsed = Math.toIntExact(parseFirstInt("water cooled", specs));
                                     target.setRadiatorLengthMm(Math.max(0, parsed));
+                                    target.setColors(parseColors("color", specs));
+
+                                    target.setFanRPM((int) parseFirstInt("fan rpm", specs));
+                                    target.setNoiseLevelDB(parseFirstDouble("noise level", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/cpu-cooler"
+                                "https://de.pc-builder.io/product-list/cpu-cooler/1"
                         )
                 )
 
@@ -173,8 +202,29 @@ public class PCBuilderIOScrapers {
                                     target.setECC(!extractFirstString("ecc / registered", specs).contains("Non-ECC"));
 
                                     target.setHasHeatSpreader(parseBoolean("heat spreader", specs));
+
+                                    target.setModel(target.getModel()
+                                            .replace(target.getManufacturer(), "")
+                                            .replace(target.getManufacturer().toUpperCase(), "")
+                                            .replace(specs.get("speed").getFirst(), "")
+                                            .replace(specs.get("modules").getFirst(), "")
+                                            .replace(target.getSticks() + " x " + target.getSizeGb() + " GB", "")
+                                            .replace("SODIMM", "")
+                                            .replace("288-Pin", "")
+                                            .replace("SDRAM", "")
+                                            .replace(target.getType().name(), "")
+                                            .replace("DIMM", "")
+                                            .replace("(", "")
+                                            .replace(")", "")
+                                            .replace("Memory", "")
+                                            .replace(target.getTotalSizeGB() + " GB", "")
+                                            .replace(target.getTotalSizeGB() + "GB", "")
+                                            .replace(target.getSpeedMtps() + "", "")
+                                            .replace("CL" + target.getCasLatency(), "")
+                                    );
+                                    target.setColors(parseColors("color", specs));
                                 },
-                                "https://de.pc-builder.io/product-list/ram"
+                                "https://de.pc-builder.io/product-list/ram/1"
                         )
                 )
 
@@ -192,7 +242,7 @@ public class PCBuilderIOScrapers {
                                     target.setResWidth(Integer.parseInt(resolution[0].trim()));
                                     target.setResHeight(Integer.parseInt(resolution[1].trim()));
                                 },
-                                "https://de.pc-builder.io/product-list/monitor"
+                                "https://de.pc-builder.io/product-list/monitor/1"
                         )
                 )
 
@@ -204,10 +254,23 @@ public class PCBuilderIOScrapers {
                             target.setStorageType(extractFirstEnum(HardwareTypes.StorageType.class, "storage", specs, (s, v) -> s.contains(v.name())));
                             String gbSize = extractFirstString("capacity", specs).toLowerCase().replace("tb", "000").replace(" ", "").replace("gb", "").trim();
                             target.setCapacityGb((int) Double.parseDouble(gbSize.trim()));
-                        }, "https://de.pc-builder.io/product-list/storage")
+                        }, "https://de.pc-builder.io/product-list/storage/1")
                 );
 
 
+    }
+
+    private static Set<String> parseColors(String key, Map<String, List<String>> specs) {
+        if (!specs.containsKey(key) || specs.get(key).isEmpty()) {
+            return new HashSet<>();
+        }
+        Set<String> colors = new HashSet<>();
+        for (String s : specs.get(key)) {
+            for (String string : s.split("[,/]")) {
+                colors.add(string.trim());
+            }
+        }
+        return colors;
     }
 }
 

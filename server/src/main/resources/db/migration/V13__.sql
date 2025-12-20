@@ -1,0 +1,1 @@
+ALTER TABLE remote_active_listing ADD COLUMN IF NOT EXISTS market_place_name VARCHAR(255) NOT NULL DEFAULT '';

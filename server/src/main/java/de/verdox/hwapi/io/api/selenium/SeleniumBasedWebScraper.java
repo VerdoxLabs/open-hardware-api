@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 
 /**
@@ -55,12 +56,12 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     private final CookieJar cookieJar;
 
     /**
-     * Erkennung von Bot-/Challenge-Seiten (z. B. Cloudflare), (url, doc) -> true wenn Challenge.
+     * Erkennung von Bot-/Challenge-Seiten (z. B. Cloudflare), (urls, doc) -> true wenn Challenge.
      */
     @Setter
     private BiPredicate<String, Document> isChallengePage;
     /**
-     * Steuerung, ob eine Seite persistiert werden soll, (url, doc) -> true = speichern.
+     * Steuerung, ob eine Seite persistiert werden soll, (urls, doc) -> true = speichern.
      */
     @Setter
     private BiPredicate<String, Document> shouldSavePage;
@@ -91,6 +92,63 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         return ScrapingPaths.fileFor(key).toAbsolutePath().toString();
     }
 
+    public Document fetchWithInteraction(String domain,
+                                         String id,
+                                         String url,
+                                         Duration ttl,
+                                         Consumer<WebDriver> interaction)
+            throws MalformedURLException, ChallengeFoundException {
+
+        FetchOptions options = new FetchOptions().setTtl(ttl);
+        return fetchWithInteraction(domain, id, url, options, interaction);
+    }
+
+    /**
+     * Variante von fetch(...), die es erlaubt, zur Laufzeit mit dem WebDriver zu interagieren
+     * (z.B. Buttons klicken, scrollen, "Load more" usw.), bevor der HTML-Snapshot
+     * erstellt und durch die normale fetch-Logik (Challenge-Detection, Caching, HtmlSlimmer, etc.)
+     * verarbeitet wird.
+     *
+     * Sämtliche bestehende Logik aus {@link #fetch(String, String, String, FetchOptions)}
+     * bleibt hierbei vollständig erhalten.
+     */
+    public Document fetchWithInteraction(String domain,
+                                         String id,
+                                         String url,
+                                         FetchOptions fetchOptions,
+                                         Consumer<WebDriver> interaction)
+            throws MalformedURLException, ChallengeFoundException {
+
+        Objects.requireNonNull(fetchOptions, "fetchOptions must not be null");
+
+        // Bisherige beforeSaveOperation merken (kann null sein)
+        var originalBeforeSave = fetchOptions.getBeforeSaveOperation();
+
+        // Neues beforeSaveOperation, das zuerst das alte, dann die Interaktion ausführt
+        fetchOptions.setBeforeSaveOperation(driver -> {
+            // 1) ursprüngliche Operation ausführen (falls vorhanden)
+            if (originalBeforeSave != null) {
+                try {
+                    originalBeforeSave.beforeSave(driver);
+                } catch (Throwable ex) {
+                    log.warn("Error in original beforeSaveOperation for url {}: {}", url, ex.toString(), ex);
+                }
+            }
+
+            // 2) zusätzliche Interaktion (z.B. Pagination-Buttons klicken)
+            if (interaction != null) {
+                try {
+                    interaction.accept(driver);
+                } catch (Throwable ex) {
+                    log.warn("Error in interaction callback for url {}: {}", url, ex.toString(), ex);
+                }
+            }
+        });
+
+        // Jetzt ganz normal die bestehende fetch-Logik verwenden
+        return fetch(domain, id, url, fetchOptions);
+    }
+
     /**
      * Haupteinstieg: Seite unter einer festen ID-Gruppe fetchen.
      *
@@ -99,98 +157,142 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
      * @param url    Ziel-URL
      * @param fetchOptions Fetch options
      */
-    public Document fetch(String domain, String id, String url, FetchOptions fetchOptions) throws MalformedURLException, ChallengeFoundException {
+    public Document fetch(String domain, String id, String url, FetchOptions fetchOptions)
+            throws MalformedURLException, ChallengeFoundException {
+
         validateDomain(domain);
         validateId(id);
+
         String canonUrl = ScrapingPaths.urlCanonical(url);
         PageKey key = new PageKey(domain, id, canonUrl);
 
-        // 1) Cache prüfen (TTL)
-        Optional<String> cached = cache.loadHtml(key).flatMap(html -> isFreshEnough(key, fetchOptions.getTtl()) ? Optional.of(html) : Optional.empty());
+        // 1) Cache lesen – roh und geprüft
+        Optional<String> cachedRaw = cache.loadHtml(key);
 
-        if (cached.isPresent()) {
-            Document cachedDocument = Jsoup.parse(cached.get(), baseUri(domain));
+        Optional<String> cachedFresh = cachedRaw.flatMap(html ->
+                isFreshEnough(key, fetchOptions.getTtl()) ? Optional.of(html) : Optional.empty()
+        );
+
+        String staleHtml = cachedRaw.orElse(null);
+
+        // 1a) Frischer Cache vorhanden → nur WENN "gut", dann zurückgeben
+        if (cachedFresh.isPresent()) {
+            Document cachedDocument = Jsoup.parse(cachedFresh.get(), baseUri(domain));
 
             if (isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument)) {
-                ScrapingService.LOGGER.log(Level.FINE, "Removing cached challenge page: " + canonUrl);
-                deleteCached(key);
-            } else if (shouldSavePage == null || !shouldSavePage.test(canonUrl, cachedDocument)) {
-                ScrapingService.LOGGER.log(Level.FINE, "Removing page that should not be saved : " + canonUrl);
-                deleteCached(key);
-            } else {
+                ScrapingService.LOGGER.log(Level.FINE,
+                        "Cached page is a challenge page, ignoring but KEEPING cache: " + canonUrl);
+            }
+            else if (shouldSavePage != null && !shouldSavePage.test(canonUrl, cachedDocument)) {
+                ScrapingService.LOGGER.log(Level.FINE,
+                        "Cached page should not be used (cookie/login), ignoring but KEEPING cache: " + canonUrl);
+            }
+            else {
+                // Cache ist gut → direkt zurück
                 return cachedDocument;
             }
         }
 
+        // 1b) Nur Cache-Modus
         if (fetchOptions.isSkipIfNotCache()) {
-            ScrapingService.LOGGER.log(Level.INFO, "Creating shell : " + canonUrl);
+            if (staleHtml != null) {
+                ScrapingService.LOGGER.log(Level.FINE,
+                        "skipIfNotCache=true → using stale cache for: " + canonUrl);
+                return Jsoup.parse(staleHtml, baseUri(domain));
+            }
+            ScrapingService.LOGGER.log(Level.INFO,
+                    "skipIfNotCache=true, but no cache present → returning shell: " + canonUrl);
             return Document.createShell(url);
         }
 
-        // 2) Live laden via Selenium
+        // 1c) Domain aktuell als OFFLINE geflagged?
+        if (isDomainOffline(domain)) {
+            //ScrapingService.LOGGER.log(Level.INFO, "Domain currently flagged OFFLINE (TTL) → skipping live fetch: " + domain);
 
+            if (staleHtml != null) {
+                return Jsoup.parse(staleHtml, baseUri(domain));
+            }
+            else {
+                ScrapingService.LOGGER.log(Level.INFO, "No cache entry found for "+url);
+            }
+            return Document.createShell(url);
+        }
 
+        // 2) Live-Laden – Headless oder Selenium – mit Fallback
         Document doc;
         String html;
+
         if (fetchOptions.isTryHeadlessFirst()) {
             try {
-                ScrapingService.LOGGER.log(Level.FINE, "Cache miss → Headless fetch: " + canonUrl + " [" + domain + ":" + id + "]");
+                ScrapingService.LOGGER.log(Level.FINE,
+                        "Cache miss → HEADLESS fetch: " + canonUrl + " [" + domain + ":" + id + "]");
                 doc = fetchHeadless(canonUrl);
                 html = doc.html();
             } catch (IOException e) {
+                // Headless fehlgeschlagen → einmalig in normalen Selenium-Flow wechseln
                 return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
             }
-        } else {
-            ScrapingService.LOGGER.log(Level.FINE, "Cache miss → Selenium fetch: " + canonUrl + " [" + domain + ":" + id + "]");
-            html = fetchWithSelenium(canonUrl, fetchOptions);
-            html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-
-            doc = Jsoup.parse(html, baseUri(domain));
         }
+        else {
+            ScrapingService.LOGGER.log(Level.FINE,
+                    "Cache miss → SELENIUM fetch: " + canonUrl + " [" + domain + ":" + id + "]");
 
-
-        if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
-            ScrapingService.LOGGER.log(Level.FINE, "Challenge page detected for URL: " + canonUrl);
             try {
+                html = fetchWithSelenium(canonUrl, fetchOptions);
+                html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
+                doc = Jsoup.parse(html, baseUri(domain));
+            }
+            catch (RuntimeException ex) {
+                ScrapingService.LOGGER.log(Level.WARNING,
+                        "Live Selenium fetch failed for " + canonUrl + " – using stale cache (if any)", ex);
 
-                if(fetchOptions.isTryHeadlessFirst()) {
-                    return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
+                // Domain als OFFLINE markieren (mit TTL 1h), wenn "offline-artige" Exception
+                if (isOfflineException(ex)) {
+                    markDomainOffline(domain);
                 }
 
-                Thread.sleep(1000);
-                HtmlSlimmer.slimHtml(webDriver.getPageSource(), canonUrl, new HtmlSlimmer.Options());
-            } catch (InterruptedException ignored) {
+                if (staleHtml != null) {
+                    return Jsoup.parse(staleHtml, baseUri(domain));
+                }
+
+                // Kein Cache → Fehler weiterwerfen
+                throw ex;
             }
         }
 
+        // 3) Challenge-Erkennung nach dem Laden
         if (isChallengePage != null && isChallengePage.test(canonUrl, doc)) {
-            ScrapingService.LOGGER.log(Level.FINE, "Challenge page detected for URL: " + canonUrl);
 
-            if(fetchOptions.isTryHeadlessFirst()) {
+            ScrapingService.LOGGER.log(Level.FINE,
+                    "Challenge detected after load for: " + canonUrl);
+
+            if (fetchOptions.isTryHeadlessFirst()) {
                 return fetch(domain, id, url, fetchOptions.setTryHeadlessFirst(false));
             }
 
-            deleteCached(key);
+            // WICHTIG: Challenge → NICHT löschen! Alten Cache BEHALTEN.
             throw new ChallengeFoundException();
         }
 
-        if (shouldSavePage == null || shouldSavePage.test(canonUrl, doc)) {
+        // 4) Prüfen ob wir die Seite speichern dürfen (z.B. keine Cookie-Wall)
+        boolean isGoodPage = (shouldSavePage == null || shouldSavePage.test(canonUrl, doc));
+
+        if (isGoodPage) {
             try {
-                cache.saveHtml(key, html);
+                cache.saveHtml(key, html); // überschreibt alten Cache
             } catch (UncheckedIOException e) {
-                ScrapingService.LOGGER.log(Level.SEVERE, "Failed to persist HTML for: " + canonUrl + " [" + domain + ":" + id + "]", e);
+                ScrapingService.LOGGER.log(Level.SEVERE,
+                        "Failed to persist HTML for: " + canonUrl + " [" + domain + ":" + id + "]", e);
             }
-        } else {
-            deleteCached(key);
+        }
+        else {
+            ScrapingService.LOGGER.log(Level.FINE,
+                    "Page is not saveable (cookie/login) → keeping old cache for: " + canonUrl);
         }
 
         return doc;
     }
+
 
 
     /* ---------------------------------------------------------
@@ -272,19 +374,25 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
 
     public synchronized WebDriver ensureDriver() throws MalformedURLException {
         if (!isSessionAlive(webDriver)) {
-            // Altes Objekt ggf. entsorgen
             try {
                 if (webDriver != null) webDriver.quit();
             } catch (Exception ignore) {
             }
             webDriver = null;
-            // Auch Registry säubern, falls dort noch ein altes Objekt lag
             try {
                 SeleniumUtil.cleanup(id);
             } catch (Exception ignore) {
             }
-            // Frischen Driver anlegen
             webDriver = SeleniumUtil.create(id, buildChromeOptions());
+
+            // ⬇️ HIER: globale Timeouts setzen
+            try {
+                webDriver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(60));
+                webDriver.manage().timeouts().scriptTimeout(Duration.ofSeconds(60));
+            } catch (Exception e) {
+                log.warn("Could not configure timeouts on WebDriver", e);
+            }
+
             if (log.isInfoEnabled()) {
                 if (webDriver instanceof RemoteWebDriver rwd) {
                     log.info("Initialized WebDriver: {}", rwd.getCapabilities());
@@ -295,6 +403,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         }
         return webDriver;
     }
+
 
     public synchronized void restartDriver() throws MalformedURLException {
         ScrapingService.LOGGER.log(Level.INFO, "Restarting WebDriver for id={0}", id);
@@ -441,5 +550,52 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         public ChallengeFoundException(Throwable cause) {
             super(cause);
         }
+    }
+
+    // TTL-Cache für "offline" Domains (Top-Level-Domain / Hostname)
+    private static final java.util.Map<String, Instant> OFFLINE_DOMAINS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final Duration OFFLINE_TTL = Duration.ofHours(1);
+
+    /**
+     * Prüft, ob eine Domain aktuell als OFFLINE geflagged ist.
+     * Abgelaufene Einträge werden dabei entfernt.
+     */
+    private boolean isDomainOffline(String domain) {
+        Instant until = OFFLINE_DOMAINS.get(domain);
+        if (until == null) {
+            return false;
+        }
+        if (Instant.now().isAfter(until)) {
+            // TTL abgelaufen → Flag löschen
+            OFFLINE_DOMAINS.remove(domain);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Markiert eine Domain für OFFLINE (für OFFLINE_TTL Dauer).
+     */
+    private void markDomainOffline(String domain) {
+        Instant until = Instant.now().plus(OFFLINE_TTL);
+        OFFLINE_DOMAINS.put(domain, until);
+        ScrapingService.LOGGER.log(Level.INFO,
+                "Marking domain as OFFLINE for " + OFFLINE_TTL.toMinutes() + " minutes: " + domain);
+    }
+
+    /**
+     * Heuristik, ob eine Exception "offline-artig" ist.
+     * Kannst du nach Bedarf verfeinern.
+     */
+    private boolean isOfflineException(Throwable ex) {
+        if (ex instanceof org.openqa.selenium.TimeoutException) {
+            return true;
+        }
+        if (ex instanceof org.openqa.selenium.WebDriverException) {
+            // z.B. netzwerk-/verbindungsbedingte Fehler
+            return true;
+        }
+        return false;
     }
 }

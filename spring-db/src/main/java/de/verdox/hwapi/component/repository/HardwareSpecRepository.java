@@ -15,6 +15,11 @@ import java.util.Set;
 
 @Repository
 public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, Long>, JpaSpecificationExecutor<HardwareSpec<?>> {
+    interface HardwareSpecMpnProjection {
+        Long getSpecId();
+        String getMpn();
+    }
+
     interface HardwareLightView {
         long getId();
 
@@ -32,6 +37,13 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     boolean existsByModelIgnoreCaseAndIdNot(String model, Long id);
 
     @Query("""
+        select h.id as specId, m as mpn
+        from HardwareSpec h
+        join h.MPNs m
+        """)
+    List<HardwareSpecMpnProjection> findAllMpnMappings();
+
+    @Query("""
             select distinct h
             from #{#entityName} h
             left join h.EANs e
@@ -39,7 +51,28 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
             where ( :hasEans = true and e in :allEans )
                or ( :hasMpns = true and m in :allMpns )
             """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
     List<HardwareSpec<?>> findAllByAnyEanOrMpnIn(
+            @Param("allEans") Collection<String> allEans,
+            @Param("allMpns") Collection<String> allMpns,
+            @Param("hasEans") boolean hasEans,
+            @Param("hasMpns") boolean hasMpns
+    );
+
+    @Query("""
+            select distinct h
+            from #{#entityName} h
+            left join h.EANs e
+            left join h.MPNs m
+            where ( :hasEans = true and e in :allEans )
+               or ( :hasMpns = true and m in :allMpns )
+            """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
+    List<HardwareSpec<?>> findAllByAnyEanOrMpnInOrModel(
             @Param("allEans") Collection<String> allEans,
             @Param("allMpns") Collection<String> allMpns,
             @Param("hasEans") boolean hasEans,
@@ -54,6 +87,9 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
                or (:hasMpns = true and exists (
                       select 1 from h.MPNs m where m in :mpns))
             """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
     List<HardwareSpec<?>> findAllByAnyEanOrMpnExists(@Param("eans") Collection<String> eans,
                                                      @Param("mpns") Collection<String> mpns,
                                                      @Param("hasEans") boolean hasEans,
@@ -65,6 +101,9 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
             join h.EANs e
             where e = :ean
             """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
     Optional<HardwareSpec<?>> findByEan(@Param("ean") String ean);
 
     @Query("""
@@ -73,15 +112,18 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
             join h.MPNs m
             where m = :mpn
             """)
+    @EntityGraph(attributePaths = {
+            "EANs", "MPNs"
+    })
     Optional<HardwareSpec<?>> findByMPN(@Param("mpn") String mpn);
 
+    @EntityGraph(attributePaths = {"EANs", "MPNs"})
     @Query("""
-            select distinct h
-            from HardwareSpec h
-            left join fetch h.EANs e
-            left join fetch h.MPNs m
-            where e = :input or m = :input
-            """)
+        select distinct h
+        from HardwareSpec h
+        where :input in elements(h.EANs)
+           or :input in elements(h.MPNs)
+        """)
     Optional<HardwareSpec<?>> findByEanOrMpn(@Param("input") String input);
 
     @Query("""

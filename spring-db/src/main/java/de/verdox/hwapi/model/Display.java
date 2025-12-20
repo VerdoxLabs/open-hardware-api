@@ -29,7 +29,7 @@ public class Display extends HardwareSpec<Display> {
         super.merge(other);
         mergeNumber(other, Display::getRefreshRate, Display::setRefreshRate);
         mergeEnum(other, Display::getDisplayPanel, Display::setDisplayPanel, HardwareTypes.DisplayPanel.UNKNOWN);
-        mergeSet(other, Display::getDisplaySyncs);
+        mergeSet(other, Display::getDisplaySyncs, Display::setDisplaySyncs);
         mergeNumber(other, Display::getHdmiPorts, Display::setHdmiPorts);
         mergeNumber(other, Display::getDisplayPorts, Display::setDisplayPorts);
         mergeNumber(other, Display::getDviPorts, Display::setDviPorts);

@@ -10,6 +10,7 @@ import de.verdox.hwapi.model.HardwareSpec;
 import lombok.Getter;
 import lombok.Setter;
 import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.support.ui.WebDriverWait;
@@ -45,7 +46,7 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
         Queue<WebsiteScrapingStrategy.MultiPageCandidate> multiPages = new ArrayDeque<>(urlsToScrape.stream().map(WebsiteScrapingStrategy.MultiPageCandidate::new).toList());
 
         if (multiPages.isEmpty()) {
-            ScrapingService.LOGGER.log(Level.SEVERE, "\tNo scraping url defined for " + domain + "[" + id + "]");
+            ScrapingService.LOGGER.log(Level.SEVERE, "\tNo scraping urls defined for " + domain + "[" + id + "]");
             return Stream.of();
         }
 
@@ -58,15 +59,20 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
             }
             alreadyCollected.add(nextCandidate.url());
 
+            FetchOptions options = new FetchOptions()
+                    .setTryHeadlessFirst(websiteScrapingStrategy.supportsHeadlessScraping())
+                    .setSkipIfNotCache(challengeFound.get())
+                    .setTtl(websiteScrapingStrategy.cacheTTLForMultiPages());
+
             try {
-
-
-                Document doc = seleniumBasedWebScraper.fetch(domain, id, nextCandidate.url(),
-                        new FetchOptions()
-                                .setTryHeadlessFirst(websiteScrapingStrategy.supportsHeadlessScraping())
-                                .setSkipIfNotCache(challengeFound.get())
-                                .setTtl(Duration.ofDays(5))
+                Document doc = seleniumBasedWebScraper.fetchWithInteraction(
+                        domain,
+                        id,
+                        nextCandidate.url(),
+                        options,
+                        driver -> websiteScrapingStrategy.interactForMultiPage(nextCandidate.url(), driver)
                 );
+
                 websiteScrapingStrategy.extractMultiPageURLs(nextCandidate.url(), doc, multiPages);
                 websiteScrapingStrategy.extractSinglePagesURLs(nextCandidate.url(), doc, singlePages);
 
@@ -80,50 +86,101 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
         ScrapingService.LOGGER.log(Level.INFO, "\tFound " + singlePages.size() + " scraping pages for " + topLevelHost + " [" + id + "]");
 
-        return singlePages.stream().filter(singlePageCandidate -> !alreadyCollected.contains(singlePageCandidate.url())).map(singlePageCandidate -> {
+        return singlePages.stream().filter(singlePageCandidate -> !alreadyCollected.contains(singlePageCandidate.urls())).map(singlePageCandidate -> {
             try {
-                return new ScrapedSpecPage(singlePageCandidate, seleniumBasedWebScraper.fetch(domain, id, singlePageCandidate.url(),
-                        new FetchOptions()
-                                .setTryHeadlessFirst(websiteScrapingStrategy.supportsHeadlessScraping())
-                                .setSkipIfNotCache(challengeFound.get())
-                                .setTtl(Duration.ofDays(1000000L))
-                                .setBeforeSaveOperation(driver -> {
-                                    new WebDriverWait(driver, Duration.ofSeconds(10)).until(webDriver -> {
+                Set<Document> documents = new HashSet<>();
+                for (String url : singlePageCandidate.urls()) {
+                    Document document = seleniumBasedWebScraper.fetch(domain, id, url,
+                            new FetchOptions()
+                                    .setTryHeadlessFirst(websiteScrapingStrategy.supportsHeadlessScraping())
+                                    .setSkipIfNotCache(challengeFound.get())
+                                    .setTtl(Duration.ofDays(1000000L))
+                                    .setBeforeSaveOperation(driver -> {
                                         try {
-                                            return ((JavascriptExecutor) webDriver).executeScript("return jQuery.active === 0;");
+                                            JavascriptExecutor js = (JavascriptExecutor) driver;
+
+                                            // 1) Minimaler React-Check
+                                            Boolean isReact = (Boolean) js.executeScript(
+                                                    "return !!window.__REACT_DEVTOOLS_GLOBAL_HOOK__ || " +
+                                                            "!!window.React || !!window.ReactDOM;"
+                                            );
+
+                                            // 2) Wenn KEIN React → sofort zurück
+                                            if (isReact == null || !isReact) return;
+
+                                            // 3) Wenn React → warte, bis React fertig gerendert hat
+                                            new WebDriverWait(driver, Duration.ofSeconds(10)).until(webDriver ->
+                                                    js.executeScript("return document.readyState === 'complete';")
+                                                            .equals(true)
+                                            );
                                         }
                                         catch (Exception e) {
-                                            return new Object();
+
                                         }
-                                    });
-                                })
-                                .setTtl(Duration.ofDays(30))
-                ));
+                                    })
+                                    .setTtl(Duration.ofDays(30))
+                    );
+                    documents.add(document);
+                }
+                return new ScrapedSpecPage(singlePageCandidate, documents);
             } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
                 challengeFound.set(true);
                 ScrapingService.LOGGER.log(Level.SEVERE, "\tChallenge found on domain " + domain);
                 return null;
             } catch (TimeoutException timeoutException) {
-                ScrapingService.LOGGER.log(Level.SEVERE, "\tTimeout while scraping single page " + singlePageCandidate.url());
+                ScrapingService.LOGGER.log(Level.SEVERE, "\tTimeout while scraping single pages " + singlePageCandidate.urls());
                 try {
                     seleniumBasedWebScraper.restartDriver();
                 } catch (MalformedURLException e) {
-                    ScrapingService.LOGGER.log(Level.SEVERE, "\tCould not restart the selenium driver " + singlePageCandidate.url(), e);
+                    ScrapingService.LOGGER.log(Level.SEVERE, "\tCould not restart the selenium driver " + singlePageCandidate.urls(), e);
                 }
                 return null;
             } catch (Throwable ex) {
-                ScrapingService.LOGGER.log(Level.SEVERE, "\tCould not scrape single page " + singlePageCandidate.url(), ex);
+                ScrapingService.LOGGER.log(Level.SEVERE, "\tCould not scrape single pages " + singlePageCandidate.urls(), ex);
                 return null;
             } finally {
-                alreadyCollected.add(singlePageCandidate.url());
+                alreadyCollected.addAll(singlePageCandidate.urls());
             }
         }).filter(Objects::nonNull);
     }
 
     @Override
     public ScrapedSpecs extract(ScrapedSpecPage scrapedPage) throws Throwable {
-        Map<String, List<String>> specs = websiteScrapingStrategy.extractSpecMap(scrapedPage.page());
+        Set<Document> pages = scrapedPage.pages();
+
+        if (pages.isEmpty()) {
+            throw new IllegalStateException("ScrapedSpecPage has no pages");
+        }
+
+        Document merged;
+        if (pages.size() == 1) {
+            // nur eine Seite – nichts zu mergen
+            merged = pages.iterator().next();
+        } else {
+            merged = mergePages(pages);
+        }
+
+        Map<String, List<String>> specs = websiteScrapingStrategy.extractSpecMap(merged);
         specs.putAll(scrapedPage.singlePageCandidate().specMap());
-        return new ScrapedSpecs(scrapedPage.singlePageCandidate().url(), specs);
+
+        return new ScrapedSpecs(scrapedPage.singlePageCandidate().urls(), specs);
+    }
+
+    private Document mergePages(Set<Document> pages) {
+        Iterator<Document> it = pages.iterator();
+
+        // Basis-Dokument (nimmt <head>, DOCTYPE etc.)
+        Document base = it.next();
+        Element baseBody = base.body();
+
+        // alle weiteren Seiten in das body des Basisdokuments hängen
+        while (it.hasNext()) {
+            Document doc = it.next();
+            for (Element child : doc.body().children()) {
+                baseBody.appendChild(child.clone()); // clone() wichtig!
+            }
+        }
+
+        return base;
     }
 }

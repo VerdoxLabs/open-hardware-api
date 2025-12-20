@@ -1,4 +1,4 @@
-package de.verdox.hwapi.priceapi.component.service;
+package de.verdox.hwapi.priceapi.component.service.ebay;
 
 import de.verdox.hwapi.hardwareapi.component.service.HardwareSpecService;
 import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
@@ -6,10 +6,11 @@ import de.verdox.hwapi.model.HardwareSpec;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;
 import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.model.values.ItemCondition;
+import de.verdox.hwapi.priceapi.component.service.PricePointSyncService;
 import de.verdox.hwapi.priceapi.io.ebay.EbayScraper;
 import de.verdox.hwapi.priceapi.io.ebay.EbaySoldItem;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayCategory;
-import de.verdox.hwapi.priceapi.io.ebay.api.EbayMarketplace;
+import de.verdox.hwapi.client.ebay.EbayCategory;
+import de.verdox.hwapi.client.ebay.EbayMarketplace;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
 import de.verdox.hwapi.priceapi.repository.PriceLookupBlockRepository;
 import de.verdox.hwapi.priceapi.repository.RemoteSoldItemRepository;

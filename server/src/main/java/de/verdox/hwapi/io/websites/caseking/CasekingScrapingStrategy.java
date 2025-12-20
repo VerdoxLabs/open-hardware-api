@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 public class CasekingScrapingStrategy implements WebsiteScrapingStrategy {
     @Override
     public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
-        for (Element element : page.select("li.page-item")) {
+        for (Element element : page.select("li.pages-item")) {
             if (element.text().equals(">")) {
                 var a = element.selectFirst("a");
                 if (a != null) {

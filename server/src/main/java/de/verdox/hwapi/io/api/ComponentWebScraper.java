@@ -18,10 +18,8 @@ import java.util.stream.Stream;
 
 public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
-    record ScrapedSpecPage(WebsiteScrapingStrategy.SinglePageCandidate singlePageCandidate, Document page){}
-    record ScrapedSpecs(String url, Map<String, List<String>> specs){}
-
-    WebsiteScrapingStrategy getWebsiteScrapingStrategy();
+    record ScrapedSpecPage(WebsiteScrapingStrategy.SinglePageCandidate singlePageCandidate, Set<Document> pages){}
+    record ScrapedSpecs(Set<String> urls, Map<String, List<String>> specs){}
 
     String baseURL();
 
@@ -42,7 +40,7 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
     interface ScrapeListener<HARDWARE extends HardwareSpec> {
         void onScrape(HARDWARE scrapedHardware);
-        default void onScrapeMulti(Set<HARDWARE> scrapedHardware) {}
+        default void onScrapeMulti(Set<? extends HARDWARE> scrapedHardware) {}
     }
 
     static boolean parseBoolean(String key, Map<String, List<String>> map) {

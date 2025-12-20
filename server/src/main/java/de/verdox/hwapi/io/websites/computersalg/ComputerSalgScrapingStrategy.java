@@ -26,10 +26,10 @@ public class ComputerSalgScrapingStrategy implements WebsiteScrapingStrategy {
             int maxPage = (int) Math.ceil(1f * max / value);
 
             for (int i = 1; i <= maxPage; i++) {
-                if (currentURL.contains("page=")) {
-                    multiPageURLs.add(new MultiPageCandidate(currentURL.split("page=")[0] + "page=" + i));
+                if (currentURL.contains("pages=")) {
+                    multiPageURLs.add(new MultiPageCandidate(currentURL.split("page=")[0] + "pages=" + i));
                 } else {
-                    multiPageURLs.add(new MultiPageCandidate(currentURL + "?page=" + i));
+                    multiPageURLs.add(new MultiPageCandidate(currentURL + "?pages=" + i));
                 }
             }
         }

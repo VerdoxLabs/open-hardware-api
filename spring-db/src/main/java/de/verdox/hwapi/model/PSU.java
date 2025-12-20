@@ -9,6 +9,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -31,7 +32,8 @@ public class PSU extends HardwareSpec<PSU> {
         mergeEnum(other, PSU::getEfficiencyRating, PSU::setEfficiencyRating, HardwareTypes.PsuEfficiencyRating.UNKNOWN);
         mergeEnum(other, PSU::getModularity, PSU::setModularity, HardwareTypes.PSU_MODULARITY.UNKNOWN);
         mergeEnum(other, PSU::getSize, PSU::setSize, HardwareTypes.PSUFormFactor.UNKNOWN);
-        mergeSet(other, PSU::getConnectors);
+        mergeSet(other, PSU::getConnectors,  PSU::setConnectors);
+        mergeSet(other, PSU::getColors, PSU::setColors);
     }
 
     @PositiveOrZero
@@ -56,6 +58,11 @@ public class PSU extends HardwareSpec<PSU> {
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "psu_connectors", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "TYPE"}))
     private Set<PowerConnector> connectors = new LinkedHashSet<>();
+
+    @ElementCollection
+    @CollectionTable(name="psu_color", joinColumns=@JoinColumn(name="psu_id"))
+    @Column(name="color", nullable=false)
+    private Set<String> colors = new HashSet<>();
 
     @Override
     public void checkIfLegal() {
