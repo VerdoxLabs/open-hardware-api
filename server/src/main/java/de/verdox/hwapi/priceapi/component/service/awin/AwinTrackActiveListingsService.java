@@ -102,8 +102,8 @@ public class AwinTrackActiveListingsService {
         updateFromAwinFeed();
     }
 
-    @PostConstruct
     @Transactional
+    @PostConstruct
     public void init() {
         CompletableFuture.runAsync(() -> {
             rebuildMpnIndex();
@@ -130,10 +130,9 @@ public class AwinTrackActiveListingsService {
     }
 
     @Transactional
-    public List<RemoteActiveListing> updateFromAwinFeed() {
+    public void updateFromAwinFeed() {
         long start = System.currentTimeMillis();
         LOGGER.log(Level.INFO, "Updating awin feed...");
-        List<RemoteActiveListing> result = new ArrayList<>();
 
         fetchRunning.set(true);
         fetchStartedAt.set(Instant.now());
@@ -151,6 +150,8 @@ public class AwinTrackActiveListingsService {
         overallTotal.set(0);
 
         try {
+            long upserted = 0;
+
             List<AwinFeed> feeds = awinFeedOverviewService.loadActiveFeeds();
             totalFeeds.set(feeds.size());
 
@@ -159,38 +160,54 @@ public class AwinTrackActiveListingsService {
 
                 currentFeedIndex.set(i + 1);
                 currentFeedAdvertiser.set(feed.advertiser());
-                currentFeedRegion.set(feed.primaryRegion() != null ? feed.primaryRegion().toString() : null);
+                currentFeedRegion.set(
+                        feed.primaryRegion() != null
+                                ? feed.primaryRegion().toString()
+                                : null
+                );
 
-                fetchMessage.set("Downloading/parsing feed " + (i + 1) + "/" + feeds.size() + " (" + feed.advertiser() + ")…");
-
-                var records = awinFeedService.downloadAndParseSingleFeed(feed);
-
-                currentFeedTotal.set(records.size());
                 currentFeedProcessed.set(0);
+                currentFeedTotal.set(0); // bleibt unbekannt
 
-                overallTotal.addAndGet(records.size());
+                fetchMessage.set(
+                        "Downloading/parsing feed " + (i + 1) + "/" + feeds.size()
+                                + " (" + feed.advertiser() + ")…"
+                );
 
-                LOGGER.log(Level.INFO, "Parsing feed from " + feed.advertiser() + " with " + records.size() + " records");
+                LOGGER.log(Level.INFO, "Streaming feed from " + feed.advertiser());
 
-                for (AwinProductRecord record : records) {
+                awinFeedService.downloadAndParseSingleFeed(feed, record -> {
                     try {
-                        RemoteActiveListing listing = mapRecordToActiveListing(feed, record);
-                        if (listing != null) result.add(listing);
-                    }
-                    catch (Exception e) {
+                        mapRecordToActiveListing(feed, record);
+                    } catch (Exception e) {
                         fetchLastError.set(e.getMessage());
-                        fetchMessage.set("Error while importing AWIN feed");
+                        LOGGER.log(
+                                Level.WARNING,
+                                "Error while processing AWIN record "
+                                        + record.getAwProductId()
+                                        + " from " + feed.advertiser(),
+                                e
+                        );
                     }
 
                     currentFeedProcessed.incrementAndGet();
                     overallProcessed.incrementAndGet();
-                }
+                });
 
-                LOGGER.log(Level.INFO, "Parsed " + records.size() + " from " + feed.advertiser());
+                LOGGER.log(
+                        Level.INFO,
+                        "Finished feed from " + feed.advertiser()
+                                + ", processed " + currentFeedProcessed.get() + " records"
+                );
             }
 
-            fetchMessage.set("Done. Upserted " + result.size() + " listings.");
-            LOGGER.log(Level.INFO, "Awin Feed updated [" + result.size() + "] took " + (System.currentTimeMillis() - start) + "ms");
+            fetchMessage.set("Done. Upserted " + upserted + " listings.");
+            LOGGER.log(
+                    Level.INFO,
+                    "Awin Feed updated [" + upserted + "] took "
+                            + (System.currentTimeMillis() - start) + "ms"
+            );
+
         } catch (Exception e) {
             fetchLastError.set(e.getMessage());
             fetchMessage.set("Error while importing AWIN feed");
@@ -201,8 +218,6 @@ public class AwinTrackActiveListingsService {
             currentFeedAdvertiser.set(null);
             currentFeedRegion.set(null);
         }
-
-        return result;
     }
 
     private RemoteActiveListing mapRecordToActiveListing(AwinFeed awinFeed, AwinProductRecord r) {

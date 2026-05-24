@@ -34,6 +34,8 @@ spring.jpa.properties.hibernate.jdbc.batch_size: 50
 spring.jpa.properties.hibernate.order_inserts: true
 spring.jpa.properties.hibernate.order_updates: true
 
+
+
 logging.level.root: INFO
 logging.level.com.ebay.api.feed: INFO
 logging.level.org.asynchttpclient: WARN
@@ -83,3 +85,12 @@ ebay:
       - ${EBAY_FEED_MARKETPLACE_3:SWITZERLAND}
       - ${EBAY_FEED_MARKETPLACE_4:USA}
       - ${EBAY_FEED_MARKETPLACE_5:UK}
+spring:
+  jpa:
+    open-in-view: false
+  datasource:
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 2
+      idle-timeout: 300000
+      max-lifetime: 1800000

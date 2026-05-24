@@ -1,6 +1,6 @@
 package de.verdox.hwapi.util;
 
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;

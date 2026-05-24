@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 @Service
@@ -28,8 +29,8 @@ public class RemoteActiveListingWriterService {
     private final RemoteActiveListingRepository listingRepository;
     private final ListingPricePointRepository priceRepository;
     private final HardwareSpecService hardwareSpecService;
+    private static final Logger LOGGER = Logger.getLogger(RemoteActiveListingWriterService.class.getName());
 
-    // Dedupe: pro (ean|mpn) nur ein Update merken
     private final Map<String, PendingLink> pendingLinks = new ConcurrentHashMap<>();
 
     @Transactional
@@ -95,19 +96,22 @@ public class RemoteActiveListingWriterService {
         String nmpn = normalize(mpn);
         String nimg = normalize(merchantImageUrl);
 
-        if (nean != null || nmpn != null) {
-            pendingLinks.put(nean + "|" + nmpn, new PendingLink(nean, nmpn, nimg));
+        if (nmpn != null) {
+            pendingLinks.put(nmpn, new PendingLink(nean, nmpn, nimg));
+        }
+
+        if (nean != null) {
+            pendingLinks.put(nean, new PendingLink(nean, nmpn, nimg));
         }
 
         return listing;
     }
 
-    // Alle X ms: alles was gesammelt wurde in einem Rutsch updaten
-    // (Wert kannst du per Property überschreiben)
     @Scheduled(fixedDelayString = "${hwapi.specLinkFlush.delayMs:1500}")
     @Transactional
     public void flushPendingSpecLinks() {
         if (pendingLinks.isEmpty()) return;
+
 
         // Snapshot + clear (damit upserts weiter sammeln können)
         List<PendingLink> batch = new ArrayList<>(pendingLinks.values());
@@ -167,19 +171,11 @@ public class RemoteActiveListingWriterService {
 
         if (!changed.isEmpty()) {
             hardwareSpecService.saveHardwareBatch(changed);
+            LOGGER.info("Flushing info from price endpoints into hardware db for "+changed.size()+" pending articles");
         }
     }
 
-    private static final class PendingLink {
-        final String ean;
-        final String mpn;
-        final String img;
-
-        private PendingLink(String ean, String mpn, String img) {
-            this.ean = ean;
-            this.mpn = mpn;
-            this.img = img;
-        }
+    private record PendingLink(String ean, String mpn, String img) {
     }
 
     private static String normalize(String s) {

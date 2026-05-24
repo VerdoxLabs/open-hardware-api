@@ -17,7 +17,8 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-public class ProductRegistryService {
+public class
+ProductRegistryService {
 
     private static final Pattern MAIN_DIGITS_PATTERN = Pattern.compile("\\b(\\d{3,5})(?!\\s*(gb|g|ghz|mhz|w))\\b");
 

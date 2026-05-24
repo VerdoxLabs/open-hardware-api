@@ -1,8 +1,8 @@
 package de.verdox.hwapi.priceapi.repository;
 
+import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.model.values.ItemCondition;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
-import de.verdox.hwapi.model.values.Currency;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,39 +12,41 @@ import java.time.LocalDate;
 import java.util.*;
 
 public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, UUID> {
+
     interface PricePoint {
-        LocalDate getSellDate();   // = r.sellDate
-        BigDecimal getPrice();     // = r.price
-        Currency getCurrency();      // = r.currency
+        LocalDate getSellDate();
+        BigDecimal getPrice();
+        Currency getCurrency();
     }
 
     interface EANPricePoint {
         String getEan();
-        LocalDate getSellDate();   // = r.sellDate
-        BigDecimal getPrice();     // = r.price
-        Currency getCurrency();      // = r.currency
+        LocalDate getSellDate();
+        BigDecimal getPrice();
+        Currency getCurrency();
     }
 
     /**
-     * Interne Query mit berechnetem fromDate (ab diesem Datum).
+     * Interne Query: RemoteSoldItem hat nur "ean" als Identifier-Feld.
+     * Daher: ein Set aus allen identifiers (EAN/MPN) und gegen r.ean matchen.
      */
     @Query("""
         SELECT r
         FROM RemoteSoldItem r
-        WHERE (r.ean IN :eans OR r.ean IN :mpns)
+        WHERE r.ean IN :identifiers
           AND r.condition IN :conditions
           AND r.sellDate >= :fromDate
         """)
     List<RemoteSoldItem> findPricePointsInternal(
-            @Param("mpns") Set<String> mpns,
-            @Param("eans") Set<String> eans,
+            @Param("identifiers") Set<String> identifiers,
             @Param("conditions") Set<ItemCondition> conditions,
             @Param("fromDate") LocalDate fromDate
     );
 
     /**
-     * Öffentliche Methode mit monthSince wie von dir vorgegeben.
-     * monthSince = Anzahl Monate rückwärts ab heute.
+     * Öffentliche Methode: monthSince wie gehabt.
+     * Bugfix: mpns wurden zuvor fälschlich gegen r.ean geprüft (und sogar doppelt "r.ean IN ...").
+     * Jetzt: merge.
      */
     default List<RemoteSoldItem> findPricePoints(
             Set<String> mpns,
@@ -56,8 +58,14 @@ public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, 
             throw new IllegalArgumentException("conditions must not be null or empty");
         }
 
+        Set<String> identifiers = new HashSet<>();
+        if (mpns != null) mpns.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isEmpty()).forEach(identifiers::add);
+        if (eans != null) eans.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isEmpty()).forEach(identifiers::add);
+
+        if (identifiers.isEmpty()) return List.of();
+
         LocalDate fromDate = LocalDate.now().minusMonths(monthSince);
-        return findPricePointsInternal(mpns, eans, conditions, fromDate);
+        return findPricePointsInternal(identifiers, conditions, fromDate);
     }
 
     @Query("""

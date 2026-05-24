@@ -2,6 +2,7 @@ package de.verdox.hwapi.hardwareapi.component.service;
 
 import de.verdox.hwapi.client.HardwareSpecClient;
 import de.verdox.hwapi.configuration.SynchronizationConfig;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
 import de.verdox.hwapi.model.HardwareSpec;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;

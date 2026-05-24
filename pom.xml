@@ -18,7 +18,8 @@
         <module>client</module>
         <module>server</module>
         <module>spring-db</module>
-<!--        <module>thirdparty/amazon-paapi</module>-->
+        <module>price-api</module>
+        <!--        <module>thirdparty/amazon-paapi</module>-->
     </modules>
     <url/>
     <licenses>

@@ -1,7 +1,7 @@
 package de.verdox.hwapi.benchmarkapi;
 
-import de.verdox.hwapi.configuration.DataStorage;
-import de.verdox.hwapi.io.api.selenium.*;
+import de.verdox.hwapi.util.DataStorage;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.*;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;

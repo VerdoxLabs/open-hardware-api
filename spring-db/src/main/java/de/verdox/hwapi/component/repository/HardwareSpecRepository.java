@@ -30,12 +30,6 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
         String getMPN();
     }
 
-    Optional<HardwareSpec<?>> findByModelIgnoreCase(String model);
-
-    boolean existsByModelIgnoreCase(String model);
-
-    boolean existsByModelIgnoreCaseAndIdNot(String model, Long id);
-
     @Query("""
         select h.id as specId, m as mpn
         from HardwareSpec h
@@ -55,24 +49,6 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
             "EANs", "MPNs"
     })
     List<HardwareSpec<?>> findAllByAnyEanOrMpnIn(
-            @Param("allEans") Collection<String> allEans,
-            @Param("allMpns") Collection<String> allMpns,
-            @Param("hasEans") boolean hasEans,
-            @Param("hasMpns") boolean hasMpns
-    );
-
-    @Query("""
-            select distinct h
-            from #{#entityName} h
-            left join h.EANs e
-            left join h.MPNs m
-            where ( :hasEans = true and e in :allEans )
-               or ( :hasMpns = true and m in :allMpns )
-            """)
-    @EntityGraph(attributePaths = {
-            "EANs", "MPNs"
-    })
-    List<HardwareSpec<?>> findAllByAnyEanOrMpnInOrModel(
             @Param("allEans") Collection<String> allEans,
             @Param("allMpns") Collection<String> allMpns,
             @Param("hasEans") boolean hasEans,
@@ -139,43 +115,25 @@ public interface HardwareSpecRepository extends JpaRepository<HardwareSpec<?>, L
     List<HardwareSpec<?>> findAllByEanOrMpn(@Param("inputs") Collection<String> inputs);
 
     @Query("""
-            select distinct h.manufacturer
-            from HardwareSpec h
-            where h.manufacturer is not null and h.manufacturer <> ''
-            """)
-    Set<String> findAllManufacturers();
-
-    @Query("""
             select distinct lower(trim(h.manufacturer))
             from HardwareSpec h
             where h.manufacturer is not null and h.manufacturer <> ''
             """)
     Set<String> findAllManufacturersNormalized();
 
-    @Query("""
-            select distinct lower(trim(h.manufacturer))
-            from HardwareSpec h
-            where h.manufacturer is not null and h.manufacturer <> ''
-            order by lower(trim(h.manufacturer))
-            """)
-    List<String> findAllManufacturersNormalizedOrdered();
-
-
-    // Leichtgewichtiger Stream in Batches:
-    @Query("""
-               select h.id as id,
-                      type(h) as discriminator,
-                      upper(h.EANs) as EANs,
-                      upper(h.MPNs) as MPN
-               from HardwareSpec h
-            """)
-    Page<HardwareLightView> findAllLight(Pageable pageable);
-
     Optional<HardwareSpec<?>> findById(long id);
 
-    // Für Locking bei Merge:
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select h from HardwareSpec h where h.id in :ids")
     List<HardwareSpec<?>> findAllForUpdate(@Param("ids") Collection<Long> ids);
+
+    @Query("select count(h) from HardwareSpec h where type(h) = :clazz")
+    long countByType(@Param("clazz") Class<? extends HardwareSpec<?>> clazz);
+
+    @Query("select h.id from HardwareSpec h where type(h) = :clazz")
+    Page<Long> findPageIdsByType(@Param("clazz") Class<? extends HardwareSpec<?>> clazz, Pageable pageable);
+
+    @Query("select h from HardwareSpec h where h.id in :ids order by h.id asc")
+    List<HardwareSpec<?>> findAllByIdInOrderByIdAsc(@Param("ids") List<Long> ids);
 
 }

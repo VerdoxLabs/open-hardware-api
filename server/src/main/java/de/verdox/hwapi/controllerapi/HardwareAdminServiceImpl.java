@@ -2,7 +2,7 @@ package de.verdox.hwapi.controllerapi;
 
 import de.verdox.hwapi.client.admin.HardwareAdminDtos;
 import de.verdox.hwapi.hardwareapi.component.service.HardwareSpecService;
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
 import de.verdox.hwapi.priceapi.component.service.ItemPriceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

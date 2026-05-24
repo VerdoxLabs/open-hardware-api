@@ -1,6 +1,6 @@
 package de.verdox.hwapi.priceapi.component.service.awin;
 
-import de.verdox.hwapi.configuration.DataStorage;
+import de.verdox.hwapi.util.DataStorage;
 import de.verdox.hwapi.priceapi.component.dto.AwinProductRecord;
 import de.verdox.hwapi.priceapi.component.util.AwinProductFeedParser;
 import org.slf4j.Logger;
@@ -18,7 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
-import java.util.*;
+import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 
 @Service
@@ -37,8 +37,7 @@ public class AwinFeedService {
      * Optional: wenn du weiterhin einen einzelnen Feed über die alte URL laden willst,
      * kannst du diese Methode behalten/anpassen.
      */
-    public List<AwinProductRecord> downloadAndParseSingleFeed(AwinFeed awinFeed)
-            throws IOException, InterruptedException {
+    public void downloadAndParseSingleFeed(AwinFeed awinFeed, Consumer<AwinProductRecord> consumer) throws IOException, InterruptedException {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(awinFeed.feedUrlDownloadLink()))
@@ -73,7 +72,7 @@ public class AwinFeedService {
 
         // Jetzt aus der gespeicherten CSV parsen
         try (InputStream csvIn = Files.newInputStream(csvFile)) {
-            return AwinProductFeedParser.parse(csvIn);
+            AwinProductFeedParser.parse(csvIn, consumer);
         }
     }
 

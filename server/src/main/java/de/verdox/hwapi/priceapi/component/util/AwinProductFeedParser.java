@@ -3,6 +3,7 @@ package de.verdox.hwapi.priceapi.component.util;
 import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.priceapi.component.dto.AwinProductRecord;
 import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 
 import java.io.BufferedInputStream;
@@ -15,12 +16,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 
 public final class AwinProductFeedParser {
 
     private static final CSVFormat CSV_FORMAT = CSVFormat.DEFAULT.builder()
             .setHeader()                // erste Zeile ist Header
+            .setAutoFlush(true)
             .setSkipHeaderRecord(true)  // Header beim Iterieren überspringen
             .build();
 
@@ -34,7 +37,7 @@ public final class AwinProductFeedParser {
      *  - unkomprimierte CSV
      * sein. Das wird automatisch erkannt.
      */
-    public static List<AwinProductRecord> parse(InputStream in) throws IOException {
+    public static void parse(InputStream in, Consumer<AwinProductRecord> consumer) throws IOException {
         Objects.requireNonNull(in, "in must not be null");
 
         // mark/reset sicherstellen
@@ -53,21 +56,22 @@ public final class AwinProductFeedParser {
         InputStream effectiveStream = isGzip ? new GZIPInputStream(in) : in;
 
         try (Reader reader = new InputStreamReader(effectiveStream, StandardCharsets.UTF_8)) {
-            Iterable<CSVRecord> records = CSV_FORMAT.parse(reader);
-            List<AwinProductRecord> result = new ArrayList<>();
+            CSVParser records = CSV_FORMAT.parse(reader);
+            try {
+                for (CSVRecord record : records) {
+                    if (record.size() == 0) {
+                        continue;
+                    }
 
-            for (CSVRecord record : records) {
-                if (record.size() == 0) {
-                    continue;
-                }
-
-                AwinProductRecord product = mapRecord(record);
-                if (product != null) {
-                    result.add(product);
+                    AwinProductRecord product = mapRecord(record);
+                    if (product != null) {
+                        consumer.accept(product);
+                    }
                 }
             }
-
-            return result;
+            finally {
+                records.close();
+            }
         }
     }
 

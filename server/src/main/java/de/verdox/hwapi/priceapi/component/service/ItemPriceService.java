@@ -5,7 +5,6 @@ import de.verdox.hwapi.client.PriceSeriesResponseDTO;
 import de.verdox.hwapi.hardwareapi.component.service.HardwareSpecService;
 import de.verdox.hwapi.model.HardwareSpec;
 import de.verdox.hwapi.model.values.ItemCondition;
-import de.verdox.hwapi.priceapi.component.service.amazon.AmazonMarketplace;
 import de.verdox.hwapi.priceapi.component.service.amazon.AmazonPriceService;
 import de.verdox.hwapi.priceapi.component.service.amazon.AmazonTrackActiveListingsService;
 import de.verdox.hwapi.priceapi.component.service.ebay.EbayCompletedListingsService;
@@ -127,7 +126,10 @@ public class ItemPriceService {
 
         Instant since = Instant.now().minus(monthSince * 30L, ChronoUnit.DAYS);
 
-        List<ListingPricePoint> points = remoteActiveListingPriceRepository.findPricePoints("%"+manufacturer+"%", mpns, eans, since);
+        boolean hasMpns = !mpns.isEmpty();
+        boolean hasEans = !eans.isEmpty();
+
+        List<ListingPricePoint> points = remoteActiveListingPriceRepository.findPricePoints("%"+manufacturer.trim().toLowerCase()+"%", mpns, eans, hasMpns, hasEans, since);
 
         PriceSeriesDTO series = new PriceSeriesDTO(ItemCondition.NEW, false, new LinkedHashMap<>());
 

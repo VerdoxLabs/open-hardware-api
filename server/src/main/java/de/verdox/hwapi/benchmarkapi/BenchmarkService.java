@@ -6,7 +6,7 @@ import de.verdox.hwapi.benchmarkapi.entity.GPUBenchmarkResults;
 import de.verdox.hwapi.benchmarkapi.repository.BenchmarkResultRepository;
 import de.verdox.hwapi.benchmarkapi.repository.CPUBenchmarkRepository;
 import de.verdox.hwapi.benchmarkapi.repository.GPUBenchmarkRepository;
-import de.verdox.hwapi.io.api.selenium.SeleniumBasedWebScraper;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.SeleniumBasedWebScraper;
 import de.verdox.hwapi.util.QueryUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -29,7 +29,7 @@ public class BenchmarkService {
     private final CPUBenchmarkRepository cpuBenchmarkRepository;
     private final GPUBenchmarkRepository gpuBenchmarkRepository;
 
-    @Scheduled(fixedRate = 1, timeUnit = TimeUnit.HOURS)
+    @Scheduled(fixedRate = 7, timeUnit = TimeUnit.DAYS)
     @Transactional
     public void updateDatabase() {
         LOGGER.info("Updating benchmark database");

@@ -11,6 +11,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -26,7 +27,8 @@ import java.util.UUID;
         ),
         indexes = {
                 @Index(name = "idx_ralp_date", columnList = "snapshot_date"),
-                @Index(name = "idx_ralp_captured_at", columnList = "captured_at")
+                @Index(name = "idx_ralp_captured_at", columnList = "captured_at"),
+                @Index(name = "idx_ralp_listing_captured_at", columnList = "listing_uuid,captured_at")
         }
 )
 public class ListingPricePoint {
@@ -40,7 +42,7 @@ public class ListingPricePoint {
     private RemoteActiveListing listing;
 
     @Column(name = "snapshot_date", nullable = false)
-    private java.time.LocalDate snapshotDate;
+    private LocalDate snapshotDate;
 
     @Column(name = "captured_at", nullable = false)
     private Instant capturedAt;

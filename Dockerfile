@@ -45,4 +45,4 @@ ENV SPRING_PROFILES_ACTIVE=prod
 
 VOLUME ["/var/lib/open-hardware-api"]
 
-ENTRYPOINT ["java","-XX:+UseContainerSupport","-XX:MaxRAMPercentage=75.0","-jar","/app/app.jar"]
+ENTRYPOINT ["java","-Dcom.sun.management.jmxremote=true", "-Dcom.sun.management.jmxremote.port=9010","-Dcom.sun.management.jmxremote.local.only=false","-Dcom.sun.management.jmxremote.authenticate=false","-Dcom.sun.management.jmxremote.ssl=false","-Dcom.sun.management.jmxremote.rmi.port=9010","-Djava.rmi.server.hostname=192.168.251.3","-XX:+UseContainerSupport","-XX:MaxRAMPercentage=75.0","-jar","/app/app.jar"]

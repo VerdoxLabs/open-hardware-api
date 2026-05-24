@@ -1,12 +1,12 @@
 package de.verdox.hwapi.priceapi.io.ebay;
 
-import de.verdox.hwapi.configuration.DataStorage;
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
-import de.verdox.hwapi.io.api.Price;
-import de.verdox.hwapi.io.api.selenium.CookieJar;
-import de.verdox.hwapi.io.api.selenium.FScrapingCache;
-import de.verdox.hwapi.io.api.selenium.FetchOptions;
-import de.verdox.hwapi.io.api.selenium.SeleniumBasedWebScraper;
+import de.verdox.hwapi.util.DataStorage;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.api.Price;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.CookieJar;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.FScrapingCache;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.FetchOptions;
+import de.verdox.hwapi.hardwareapi.scraping.api.selenium.SeleniumBasedWebScraper;
 import de.verdox.hwapi.model.values.Currency;
 import de.verdox.hwapi.client.ebay.EbayCategory;
 import de.verdox.hwapi.client.ebay.EbayMarketplace;

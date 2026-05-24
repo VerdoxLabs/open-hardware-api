@@ -2,7 +2,7 @@ package de.verdox.hwapi.priceapi.component.service;
 
 import de.verdox.hwapi.client.HWApiPricesClient;
 import de.verdox.hwapi.client.HardwareSpecClient;
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
 import de.verdox.hwapi.configuration.SynchronizationConfig;
 import de.verdox.hwapi.priceapi.model.RemoteSoldItem;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;

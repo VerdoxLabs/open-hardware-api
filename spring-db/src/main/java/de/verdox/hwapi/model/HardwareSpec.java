@@ -1,12 +1,11 @@
 package de.verdox.hwapi.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import de.verdox.hwapi.component.repository.HardwareSpecificRepo;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.NaturalId;
 
 import java.text.Normalizer;
 import java.time.LocalDate;
@@ -25,6 +24,7 @@ import java.util.function.Predicate;
 @Setter
 public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     @Id
+    @EqualsAndHashCode.Exclude
     @GeneratedValue(strategy = GenerationType.AUTO)
     private long id;
 
@@ -107,6 +107,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
 
     public abstract void checkIfLegal();
 
+
     @PrePersist
     public void sanitizeNumbers() {
         var modelBefore = getModel();
@@ -135,10 +136,26 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         if(getModel().isBlank()) {
             setModel(modelBefore);
         }
+        getPictureUrls().remove("https://images2.productserve.com/noimage.gif");
     }
 
     public void sanitize() {
 
+    }
+
+    public String getDisplayPictureUrl() {
+        for (String pictureUrl : getPictureUrls()) {
+            if(pictureUrl.contains("noimage")) {
+                continue;
+            }
+            return pictureUrl;
+        }
+        return "https://images2.productserve.com/noimage.gif";
+    }
+
+    @PostLoad
+    public void postLoad() {
+        getPictureUrls().remove("https://images2.productserve.com/noimage.gif");
     }
 
     @JsonIgnore

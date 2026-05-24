@@ -2,8 +2,8 @@ package de.verdox.hwapi.priceapi.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
-import de.verdox.hwapi.configuration.DataStorage;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
+import de.verdox.hwapi.util.DataStorage;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.Setter;

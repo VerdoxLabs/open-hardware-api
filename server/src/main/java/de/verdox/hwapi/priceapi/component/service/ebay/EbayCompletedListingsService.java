@@ -1,7 +1,7 @@
 package de.verdox.hwapi.priceapi.component.service.ebay;
 
 import de.verdox.hwapi.hardwareapi.component.service.HardwareSpecService;
-import de.verdox.hwapi.hardwareapi.component.service.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
 import de.verdox.hwapi.model.HardwareSpec;
 import de.verdox.hwapi.model.dto.PricePointUploadDto;
 import de.verdox.hwapi.model.values.Currency;

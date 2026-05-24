@@ -1,18 +1,20 @@
 package de.verdox.hwapi.hardwareapi.component.service;
 
 import de.verdox.hwapi.component.repository.*;
-import de.verdox.hwapi.io.api.ComponentWebScraper;
+import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
+import de.verdox.hwapi.hardwareapi.scraping.api.ComponentWebScraper;
 import de.verdox.hwapi.model.*;
 import de.verdox.hwapi.productidregistry.ProductRegistryService;
 import de.verdox.hwapi.util.GpuRegexParser;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Example;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.text.Normalizer;
 import java.util.*;
@@ -26,15 +28,43 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     private final Logger LOGGER = Logger.getLogger(HardwareSpecService.class.getName());
     private final HardwareSpecRepository baseRepo;
     private final GPUChipRepository gpuChipRepository;
-    private static final Set<String> normalizedManufacturers = new HashSet<>();
+
+    /**
+     * FIX: RAM leak
+     * - not static (static would grow JVM-wide forever)
+     * - bounded LRU (prevents unbounded growth)
+     * - store normalized values (lowercase/trim)
+     */
+    private static final int MAX_MANUFACTURER_CACHE_SIZE = 10_000;
+    private final Set<String> normalizedManufacturers =
+            Collections.newSetFromMap(new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                    return size() > MAX_MANUFACTURER_CACHE_SIZE;
+                }
+            });
 
     private final Map<Class<? extends HardwareSpec<?>>, HardwareSpecificRepo<? extends HardwareSpec<?>>> repoByType = new HashMap<>();
     private final Set<String> validTypes;
     private final ProductRegistryService productRegistryService;
-
+    private final HardwareSpecCache cache;
 
     @Autowired
-    public HardwareSpecService(HardwareSpecRepository baseRepo, CPURepository cpuRepository, CPUCoolerRepository cpuCoolerRepository, GPUChipRepository gpuChipRepository, GPURepository gpuRepository, MotherboardRepository motherboardRepository, PCCaseRepository pcCaseRepository, PSURepository psuRepository, RAMRepository ramRepository, StorageRepository storageRepository, DisplayRepository displayRepository, ProductRegistryService productRegistryService) {
+    public HardwareSpecService(
+            HardwareSpecCache cache,
+            HardwareSpecRepository baseRepo,
+            CPURepository cpuRepository,
+            CPUCoolerRepository cpuCoolerRepository,
+            GPUChipRepository gpuChipRepository,
+            GPURepository gpuRepository,
+            MotherboardRepository motherboardRepository,
+            PCCaseRepository pcCaseRepository,
+            PSURepository psuRepository,
+            RAMRepository ramRepository,
+            StorageRepository storageRepository,
+            DisplayRepository displayRepository,
+            ProductRegistryService productRegistryService
+    ) {
         this.baseRepo = baseRepo;
         this.gpuChipRepository = gpuChipRepository;
 
@@ -49,19 +79,35 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         repoByType.put(Storage.class, storageRepository);
         repoByType.put(Display.class, displayRepository);
 
-        normalizedManufacturers.addAll(baseRepo.findAllManufacturersNormalized());
-        this.validTypes = HardwareTypeUtil.getSupportedSpecTypes().stream().map(Class::getSimpleName).map(String::toLowerCase).collect(Collectors.toSet());
+        this.cache = cache;
+
+        // load normalized manufacturers (defensive: normalize again)
+        try {
+            baseRepo.findAllManufacturersNormalized().forEach(this::rememberManufacturer);
+        } catch (Throwable ignored) {
+        }
+
+        this.validTypes = HardwareTypeUtil.getSupportedSpecTypes().stream()
+                .map(Class::getSimpleName)
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
         this.productRegistryService = productRegistryService;
     }
 
     public Class<? extends HardwareSpec<?>> getType(String type) {
-        return HardwareTypeUtil.getSupportedSpecTypes().stream().filter(aClass -> {
-            return aClass.getSimpleName().toLowerCase().equals(type);
-        }).findFirst().orElse(null);
+        return HardwareTypeUtil.getSupportedSpecTypes().stream()
+                .filter(aClass -> aClass.getSimpleName().toLowerCase().equals(type))
+                .findFirst()
+                .orElse(null);
     }
 
     public String getTypeAsString(Class<? extends HardwareSpec<?>> type) {
-        return HardwareTypeUtil.getSupportedSpecTypes().stream().filter(aClass -> aClass.equals(type)).map(aClass -> aClass.getSimpleName().toLowerCase()).findFirst().orElse(null);
+        return HardwareTypeUtil.getSupportedSpecTypes().stream()
+                .filter(aClass -> aClass.equals(type))
+                .map(aClass -> aClass.getSimpleName().toLowerCase())
+                .findFirst()
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -69,22 +115,18 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             Class<HARDWARE> clazz,
             Pageable pageable
     ) {
-
         HardwareSpecificRepo<HARDWARE> repo = getRepo(clazz);
 
-
-        // Schritt 1: IDs holen
         Page<Long> idPage = repo.findPageIds(pageable);
         if (idPage.isEmpty()) {
             return new PageImpl<>(new ArrayList<>(), pageable, 0);
         }
 
         List<HARDWARE> items = repo.findAllByIdInOrderByIdAsc(idPage.getContent());
-
-        // Schritt 3: Page zusammenbauen
         return new PageImpl<>(items, pageable, idPage.getTotalElements());
     }
 
+    @SuppressWarnings("unchecked")
     public <HARDWARE extends HardwareSpec<HARDWARE>> HardwareSpecificRepo<HARDWARE> getRepo(Class<HARDWARE> type) {
         if (type == null) return null;
         return (HardwareSpecificRepo<HARDWARE>) repoByType.get(type);
@@ -98,27 +140,24 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         return validTypes.contains(type.toLowerCase());
     }
 
-    public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByExample(Class<HARDWARE> type, Example<HARDWARE> example) {
-        HardwareSpecificRepo<HARDWARE> repository = (HardwareSpecificRepo<HARDWARE>) repoByType.get(type);
-        if (repository == null) return null;
-
-        return repository.findAll(example).getFirst();
-    }
-
     @Transactional(readOnly = true)
     public long countAllHardware() {
-        // robust ohne baseRepo.count() (falls Vererbung/Repo-Setup tricky):
-        // return findAll().size();
         return baseRepo.count();
     }
 
+    /**
+     * JOINED inheritance:
+     * Delete children first (type repos), parent last (base repo) to avoid FK issues.
+     * Also: clear cache after commit.
+     */
     @Transactional
     public void deleteAllHardwareData() {
-        // Subtype-Repos zuerst (sicher bei FK/JoinTables), dann baseRepo
         for (var repo : repoByType.values()) {
             repo.deleteAll();
         }
         baseRepo.deleteAll();
+
+        afterCommit(cache::clear);
     }
 
     @Transactional(readOnly = true)
@@ -148,63 +187,81 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
     }
 
-    /**
-     * Liefert alle unterstützten Hardware-Typen (aus eurer Utility).
-     */
-    public Collection<Class<? extends HardwareSpec<?>>> getSupportedSpecTypes() {
-        return HardwareTypeUtil.getSupportedSpecTypes();
-    }
-
-    public boolean knowsHardware(String model) {
-        return baseRepo.existsByModelIgnoreCase(model);
-    }
-
-    /**
-     * Findet alle Entities eines konkreten Subtyps.
-     */
-    @Transactional(readOnly = true)
-    public List<HardwareSpec<?>> findByType(Class<? extends HardwareSpec<?>> type) {
-        CrudRepository<? extends HardwareSpec<?>, Long> repo = repoByType.get(type);
-        if (repo == null) {
-            throw new IllegalArgumentException("Kein Repository für Typ: " + type.getSimpleName());
-        }
-        // Spring gibt Iterable zurück → in List casten
-        Iterable<? extends HardwareSpec<?>> all = repo.findAll();
-        List<HardwareSpec<?>> result = new ArrayList<>();
-        all.forEach(result::add);
-        return result;
-    }
-
     @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByEAN(Class<HARDWARE> clazz, String EAN) {
-        Optional<HARDWARE> found = getRepo(clazz).findByEan(EAN);
-        return found.orElse(null);
-    }
-
-    @Transactional(readOnly = true)
-    public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByEAN(String EAN) {
         return (HARDWARE) baseRepo.findByEan(EAN).orElse(null);
     }
 
     @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByEANOrMPN(String input) {
-        return (HARDWARE) baseRepo.findByEanOrMpn(input).orElse(null);
+        HardwareSpec<?> cached = cache.getByKey(input);
+        if (cached != null) {
+            return (HARDWARE) cached;
+        }
+
+        HARDWARE fromDb = (HARDWARE) baseRepo.findByEanOrMpn(input).orElse(null);
+        if (fromDb != null) {
+            cache.put(fromDb);
+        }
+        return fromDb;
     }
 
     @Transactional(readOnly = true)
     public List<HardwareSpec<?>> findAllByEANOrMPN(List<String> decodedKeys) {
-        return baseRepo.findAllByEanOrMpn(decodedKeys);
+        if (decodedKeys == null || decodedKeys.isEmpty()) {
+            return List.of();
+        }
+
+        final int KEY_CHUNK = 100;
+
+        // Ergebnis dedupen (ein Spec kann über mehrere Keys gefunden werden)
+        Map<Long, HardwareSpec<?>> resultById = new LinkedHashMap<>();
+
+        // Misses sammeln
+        List<String> misses = new ArrayList<>(decodedKeys.size());
+
+        for (String key : decodedKeys) {
+            if (key == null || key.isBlank()) continue;
+
+            HardwareSpec<?> cached = cache.getByKey(key);
+            if (cached != null) {
+                resultById.putIfAbsent(cached.getId(), cached);
+            } else {
+                misses.add(key);
+            }
+        }
+
+        if (misses.isEmpty()) {
+            return new ArrayList<>(resultById.values());
+        }
+
+        // DB nur für Misses, gechunked
+        for (int i = 0; i < misses.size(); i += KEY_CHUNK) {
+            int end = Math.min(i + KEY_CHUNK, misses.size());
+            List<String> chunk = misses.subList(i, end);
+
+            List<HardwareSpec<?>> found = baseRepo.findAllByEanOrMpn(chunk);
+            for (HardwareSpec<?> spec : found) {
+                if (spec == null) continue;
+                resultById.putIfAbsent(spec.getId(), spec);
+                cache.put(spec);
+            }
+        }
+
+        return new ArrayList<>(resultById.values());
     }
 
     @Transactional(readOnly = true)
     public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findById(long id) {
-        return (HARDWARE) baseRepo.findById(id).orElse(null);
-    }
-
-    @Transactional(readOnly = true)
-    public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE findByMPN(Class<HARDWARE> clazz, String MPN) {
-        Optional<HARDWARE> found = getRepo(clazz).findByMPN(MPN);
-        return found.orElse(null);
+        HardwareSpec<?> cached = cache.getById(id);
+        if (cached != null) {
+            return (HARDWARE) cached;
+        }
+        HARDWARE fromDb = (HARDWARE) baseRepo.findById(id).orElse(null);
+        if (fromDb != null) {
+            cache.put(fromDb);
+        }
+        return fromDb;
     }
 
     @Transactional(readOnly = true)
@@ -218,38 +275,47 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     }
 
     /**
-     * Findet alle Entities (alle Subtypen).
+     * Findet alle Entities (alle Subtypen) über die Subtyp-Repos,
+     * damit EntityGraphs korrekt greifen (JOINED + Graphs je Subrepo).
      */
     @Transactional(readOnly = true)
     public List<HardwareSpec<?>> findAll() {
-        // Variante A: Wenn Basistyp-Repo alle Subtypen kennt (bei JPA-Vererbung üblich):
-        // return baseRepo.findAll();
-
-        // Variante B: Aggregation aus allen Subtyp-Repos (robust, falls Basistyp-Repo nicht genutzt werden soll):
-        return repoByType.values().stream().flatMap(repo -> {
-            List<HardwareSpec<?>> list = new ArrayList<>();
-            @SuppressWarnings("unchecked") Iterable<HardwareSpec<?>> it = (Iterable<HardwareSpec<?>>) repo.findAll();
-            it.forEach(list::add);
-            return list.stream();
-        }).collect(Collectors.toList());
+        return repoByType.values().stream()
+                .flatMap(repo -> {
+                    List<HardwareSpec<?>> list = new ArrayList<>();
+                    @SuppressWarnings("unchecked")
+                    Iterable<HardwareSpec<?>> it = (Iterable<HardwareSpec<?>>) repo.findAll();
+                    it.forEach(list::add);
+                    return list.stream();
+                })
+                .collect(Collectors.toList());
     }
 
-    public static boolean sanitizeBeforeSave(HardwareSpec<?> hardwareSpec) {
+    /**
+     * Instance method now (not static), uses bounded manufacturer cache.
+     */
+    public boolean sanitizeBeforeSave(HardwareSpec<?> hardwareSpec) {
         if (hardwareSpec == null) {
             throw new IllegalArgumentException("hardwareSpec darf nicht null sein");
         }
 
         String normalizedModel = normalizeModel(hardwareSpec.getModel());
-        if (hardwareSpec.getModel() == null || hardwareSpec.getModel().isBlank() || normalizedModel == null || normalizedModel.isBlank()) {
+        if (hardwareSpec.getModel() == null || hardwareSpec.getModel().isBlank()
+                || normalizedModel == null || normalizedModel.isBlank()) {
             ScrapingService.LOGGER.log(Level.FINE, "Hardware model cannot be null.");
             return false;
         }
 
         hardwareSpec.setModel(normalizedModel);
 
-
         if (hardwareSpec.getManufacturer() == null || hardwareSpec.getManufacturer().isBlank()) {
-            hardwareSpec.setManufacturer(getAllKnownManufacturers().stream().filter(s -> normalizedModel.toLowerCase().contains(s)).findAny().orElse(null));
+            String lc = normalizedModel.toLowerCase(Locale.ROOT);
+            hardwareSpec.setManufacturer(
+                    normalizedManufacturers.stream()
+                            .filter(lc::contains)
+                            .findAny()
+                            .orElse(null)
+            );
         }
 
         if (hardwareSpec.getMPNs().isEmpty()) {
@@ -262,17 +328,20 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             return false;
         }
 
-
         hardwareSpec.checkIfLegal();
         return true;
     }
 
     /**
      * Speichert eine Hardware-Instanz im passenden Repository.
+     * JOINED: baseRepo speichert Parent; specificRepo speichert Child.
+     * Cache wird nach Commit aktualisiert.
      */
     @Transactional
     public void saveHardware(HardwareSpec<?> incoming) {
-        normalizedManufacturers.add(incoming.getManufacturer());
+        if (incoming == null) return;
+
+        rememberManufacturer(incoming.getManufacturer());
 
         final var eans = incoming.getEANs();
         final var mpns = incoming.getMPNs();
@@ -289,6 +358,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             }
             baseRepo.save(incoming);
             saveWithSpecificRepo(incoming);
+
+            afterCommit(() -> cache.put(incoming));
             return;
         }
 
@@ -303,17 +374,20 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             if (other.getId() != target.getId()) {
                 target.tryMerge(other);
                 deleteWithBothRepos(other);
+                afterCommit(() -> cache.evict(other));
             }
         }
 
-        if(!sanitizeBeforeSave(incoming)) {
+        // BUGFIX: sanitize target, not incoming
+        if (!sanitizeBeforeSave(target)) {
             return;
         }
 
         baseRepo.save(target);
         saveWithSpecificRepo(target);
-    }
 
+        afterCommit(() -> cache.put(target));
+    }
 
     @Transactional
     public void saveHardwareBatch(Set<? extends HardwareSpec<?>> incomingSet) {
@@ -321,54 +395,67 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             return;
         }
 
-        // 1) Hersteller normalisieren
+        final int SPEC_CHUNK = 100;
+        final int KEY_CHUNK  = 100;
+
+        final Map<Long, HardwareSpec<?>> targetsById = new LinkedHashMap<>();
+        final Map<String, HardwareSpec<?>> byEan = new HashMap<>();
+        final Map<String, HardwareSpec<?>> byMpn = new HashMap<>();
+
+        List<HardwareSpec<?>> batch = new ArrayList<>(SPEC_CHUNK);
         for (HardwareSpec<?> incoming : incomingSet) {
-            normalizedManufacturers.add(incoming.getManufacturer());
-        }
+            rememberManufacturer(incoming.getManufacturer());
+            batch.add(incoming);
 
-        // 2) Alle EANs/MPNs aus dem ganzen Set sammeln
-        Set<String> allEans = new HashSet<>();
-        Set<String> allMpns = new HashSet<>();
-
-        for (HardwareSpec<?> incoming : incomingSet) {
-            if (incoming.getEANs() != null) {
-                allEans.addAll(incoming.getEANs().stream().map(HardwareSpec::normalizeEan).collect(Collectors.toSet()));
-            }
-            if (incoming.getMPNs() != null) {
-                allMpns.addAll(incoming.getMPNs().stream().map(HardwareSpec::normalizeMpn).collect(Collectors.toSet()));
+            if (batch.size() >= SPEC_CHUNK) {
+                processIncomingChunk(batch, targetsById, byEan, byMpn, KEY_CHUNK);
+                batch.clear();
             }
         }
+        if (!batch.isEmpty()) {
+            processIncomingChunk(batch, targetsById, byEan, byMpn, KEY_CHUNK);
+        }
+    }
 
-        boolean hasEans = !allEans.isEmpty();
-        boolean hasMpns = !allMpns.isEmpty();
+    private void processIncomingChunk(
+            List<HardwareSpec<?>> incomingChunk,
+            Map<Long, HardwareSpec<?>> targetsById,
+            Map<String, HardwareSpec<?>> byEan,
+            Map<String, HardwareSpec<?>> byMpn,
+            int keyChunkSize
+    ) {
+        Set<String> eans = new HashSet<>();
+        Set<String> mpns = new HashSet<>();
 
-        // 3) Einmalig alle existierenden Matches laden
-        List<HardwareSpec<?>> existingMatches = (hasEans || hasMpns)
-                ? baseRepo.findAllByAnyEanOrMpnInOrModel(allEans, allMpns, hasEans, hasMpns)
-                : new ArrayList<>();
-
-        // 4) Index im Speicher aufbauen: EAN/MPN → bestehendes HardwareSpec
-        Map<String, HardwareSpec<?>> byEan = new HashMap<>();
-        Map<String, HardwareSpec<?>> byMpn = new HashMap<>();
-
-        for (HardwareSpec<?> existing : existingMatches) {
-            if (existing.getEANs() != null) {
-                for (String ean : existing.getEANs()) {
-                    byEan.putIfAbsent(ean, existing);
+        for (HardwareSpec<?> in : incomingChunk) {
+            if (in.getEANs() != null) {
+                for (String e : in.getEANs()) {
+                    String ne = HardwareSpec.normalizeEan(e);
+                    if (ne != null) eans.add(ne);
                 }
             }
-            if (existing.getMPNs() != null) {
-                for (String mpn : existing.getMPNs()) {
-                    byMpn.putIfAbsent(mpn, existing);
+            if (in.getMPNs() != null) {
+                for (String m : in.getMPNs()) {
+                    String nm = HardwareSpec.normalizeMpn(m);
+                    if (nm != null) mpns.add(nm);
                 }
             }
         }
 
-        // 5) Merging im Speicher
-        //    Wichtig: wir wollen auch Duplikate innerhalb des incomingSets zusammenführen.
-        Set<HardwareSpec<?>> toPersist = new LinkedHashSet<>(existingMatches);
+        if (!eans.isEmpty() || !mpns.isEmpty()) {
+            List<HardwareSpec<?>> existingMatches = findExistingMatchesChunked(eans, mpns, keyChunkSize);
 
-        for (HardwareSpec<?> incoming : incomingSet) {
+            for (HardwareSpec<?> ex : existingMatches) {
+                HardwareSpec<?> already = targetsById.putIfAbsent(ex.getId(), ex);
+                HardwareSpec<?> target = (already != null) ? already : ex;
+
+                indexKeys(target, byEan, byMpn);
+            }
+        }
+
+        Set<HardwareSpec<?>> toPersist = new LinkedHashSet<>();
+
+        for (HardwareSpec<?> incoming : incomingChunk) {
             if (!sanitizeBeforeSave(incoming)) {
                 continue;
             }
@@ -376,40 +463,106 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             HardwareSpec<?> target = findTargetForIncoming(incoming, byEan, byMpn);
 
             if (target == null) {
-                // Kein Match in DB oder im Index → neues Objekt
                 target = incoming;
                 if (!sanitizeBeforeSave(target)) {
                     continue;
                 }
                 toPersist.add(target);
+                indexKeys(target, byEan, byMpn);
             } else {
-                // Gefundenes Target → mergen
                 target.tryMerge(incoming);
+
                 if (!sanitizeBeforeSave(target)) {
                     continue;
                 }
-            }
+                toPersist.add(target);
 
-            // Index aktualisieren, falls neue EANs/MPNs hinzugekommen sind
-            if (target.getEANs() != null) {
-                for (String ean : target.getEANs()) {
-                    byEan.putIfAbsent(ean, target);
-                }
+                indexKeys(target, byEan, byMpn);
             }
-            if (target.getMPNs() != null) {
-                for (String mpn : target.getMPNs()) {
-                    byMpn.putIfAbsent(mpn, target);
-                }
-            }
+        }
+
+        if (toPersist.isEmpty()) {
+            return;
         }
 
         baseRepo.saveAll(toPersist);
         for (HardwareSpec<?> spec : toPersist) {
             saveWithSpecificRepo(spec);
+            if (spec.getId() != 0) {
+                targetsById.putIfAbsent(spec.getId(), spec);
+            }
+        }
+
+        Set<HardwareSpec<?>> persistedSnapshot = new LinkedHashSet<>(toPersist);
+        afterCommit(() -> {
+            for (HardwareSpec<?> spec : persistedSnapshot) {
+                cache.put(spec);
+            }
+        });
+    }
+
+    private List<HardwareSpec<?>> findExistingMatchesChunked(Set<String> eans, Set<String> mpns, int chunkSize) {
+        Map<Long, HardwareSpec<?>> byId = new LinkedHashMap<>();
+
+        if (eans != null && !eans.isEmpty()) {
+            List<String> list = new ArrayList<>(eans);
+            for (int i = 0; i < list.size(); i += chunkSize) {
+                int end = Math.min(i + chunkSize, list.size());
+                Set<String> eChunk = new HashSet<>(list.subList(i, end));
+
+                List<HardwareSpec<?>> found = baseRepo.findAllByAnyEanOrMpnIn(
+                        eChunk,
+                        Collections.emptySet(),
+                        true,
+                        false
+                );
+                for (HardwareSpec<?> s : found) {
+                    byId.putIfAbsent(s.getId(), s);
+                }
+            }
+        }
+
+        if (mpns != null && !mpns.isEmpty()) {
+            List<String> list = new ArrayList<>(mpns);
+            for (int i = 0; i < list.size(); i += chunkSize) {
+                int end = Math.min(i + chunkSize, list.size());
+                Set<String> mChunk = new HashSet<>(list.subList(i, end));
+
+                // nur MPNs
+                List<HardwareSpec<?>> found = baseRepo.findAllByAnyEanOrMpnIn(
+                        Collections.emptySet(),
+                        mChunk,
+                        false,
+                        true
+                );
+                for (HardwareSpec<?> s : found) {
+                    byId.putIfAbsent(s.getId(), s);
+                }
+            }
+        }
+
+        return new ArrayList<>(byId.values());
+    }
+
+    private void indexKeys(HardwareSpec<?> spec,
+                           Map<String, HardwareSpec<?>> byEan,
+                           Map<String, HardwareSpec<?>> byMpn) {
+        if (spec == null) return;
+
+        if (spec.getEANs() != null) {
+            for (String e : spec.getEANs()) {
+                String ne = HardwareSpec.normalizeEan(e);
+                if (ne != null) byEan.putIfAbsent(ne, spec);
+            }
+        }
+        if (spec.getMPNs() != null) {
+            for (String m : spec.getMPNs()) {
+                String nm = HardwareSpec.normalizeMpn(m);
+                if (nm != null) byMpn.putIfAbsent(nm, spec);
+            }
         }
     }
 
-    // Hilfsfunktion: passend zu deiner Einzellogik
     private HardwareSpec<?> findTargetForIncoming(
             HardwareSpec<?> incoming,
             Map<String, HardwareSpec<?>> byEan,
@@ -417,36 +570,34 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     ) {
         HardwareSpec<?> anyMatch = null;
 
-        // 1) Über EANs
         if (incoming.getEANs() != null) {
             for (String ean : incoming.getEANs()) {
+                if (ean == null) continue;
                 HardwareSpec<?> candidate = byEan.get(ean);
                 if (candidate != null) {
                     if (candidate.getClass().equals(incoming.getClass())) {
-                        return candidate; // best case
+                        return candidate;
                     }
-                    if (anyMatch == null) anyMatch = candidate; // fallback merken
+                    if (anyMatch == null) anyMatch = candidate;
                 }
             }
         }
 
-        // 2) Über MPNs
         if (incoming.getMPNs() != null) {
             for (String mpn : incoming.getMPNs()) {
+                if (mpn == null) continue;
                 HardwareSpec<?> candidate = byMpn.get(mpn);
                 if (candidate != null) {
                     if (candidate.getClass().equals(incoming.getClass())) {
-                        return candidate; // best case
+                        return candidate;
                     }
-                    if (anyMatch == null) anyMatch = candidate; // fallback merken
+                    if (anyMatch == null) anyMatch = candidate;
                 }
             }
         }
 
-        // 3) Fallback wie saveHardware()
         return anyMatch;
     }
-
 
     private void saveWithSpecificRepo(HardwareSpec<?> entity) {
         @SuppressWarnings("unchecked")
@@ -458,6 +609,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     }
 
     private void deleteWithBothRepos(HardwareSpec<?> entity) {
+        // For JOINED this is safe (Hibernate knows concrete type and deletes child+parent),
+        // but we keep both to match your previous behavior and avoid edge cases.
         baseRepo.delete(entity);
         @SuppressWarnings("unchecked")
         CrudRepository<HardwareSpec<?>, Long> specific =
@@ -467,119 +620,17 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
     }
 
-    private static boolean hasText(String s) {
-        return s != null && !s.isBlank();
-    }
-
-    @Transactional
-    public <HARDWARE extends HardwareSpec<HARDWARE>> HARDWARE merge(HARDWARE entity) {
-        // Normalisierte Kennungen aus dem eingehenden Entity
-        HardwareSpecificRepo<HARDWARE> repo = getRepo(entity.getClass());
-        if (repo == null) {
-            return null;
-        }
-
-        HARDWARE byEan = null, byMpn = null;
-        if (!entity.getMPNs().isEmpty()) {
-            for (String mpn : entity.getMPNs()) {
-                byMpn = repo.findByMPN(mpn).orElse(null);
-                if (byMpn != null) {
-                    break;
-                }
-            }
-        }
-
-        if (!entity.getEANs().isEmpty()) {
-            for (String ean : entity.getMPNs()) {
-                byEan = repo.findByEan(ean).orElse(null);
-                if (byEan != null) {
-                    break;
-                }
-            }
-        }
-
-        // Prüfe, ob mehrere unterschiedliche Treffer existieren
-        HARDWARE found = firstNonNull(byEan, byMpn);
-        if (found != null) {
-            if (byMpn != null && (byMpn.getId() != found.getId())) {
-                throw new IllegalStateException("Conflict in mergeAll: EAN/UPC/MPN are referencing distinct data entries.");
-            }
-            // Domain-spezifisches Merge am Aggregat
-            found.merge(entity);
-            saveHardware(found);
-            return found;
-        } else {
-            saveHardware(entity);
-            return entity;
+    private void rememberManufacturer(String manufacturer) {
+        if (manufacturer == null) return;
+        String norm = manufacturer.trim().toLowerCase(Locale.ROOT);
+        if (!norm.isBlank()) {
+            normalizedManufacturers.add(norm);
         }
     }
 
-    @Transactional
-    public <HARDWARE extends HardwareSpec<HARDWARE>> List<HARDWARE> mergeAll(Class<HARDWARE> clazz, Collection<HARDWARE> input) {
-        HardwareSpecificRepo<HARDWARE> repo = getRepo(clazz);
-        if (repo == null) {
-            return new ArrayList<>(input);
-        }
-
-        Set<String> eans = new HashSet<>(), mpns = new HashSet<>();
-        for (HARDWARE e : input) {
-            eans.addAll(e.getEANs());
-            mpns.addAll(e.getMPNs());
-        }
-
-        Map<String, HARDWARE> byEanMap = repo.findAllByEanIn(eans);
-        Map<String, HARDWARE> byMpnMap = repo.findAllByMPNInNormalized(mpns);
-
-        List<HARDWARE> toSave = new ArrayList<>();
-        for (HARDWARE e : input) {
-
-            for (String mpn : e.getMPNs()) {
-                HARDWARE foundByMpn = notBlank(mpn) ? byMpnMap.get(mpn) : null;
-
-                HARDWARE found = firstNonNull(foundByMpn);
-                if (found != null) {
-                    if (foundByMpn != null && !(foundByMpn.getId() == found.getId())) {
-                        throw new IllegalStateException("Conflict in mergeAll: EAN/UPC/MPN are referencing distinct data entries.");
-                    }
-                    found.merge(e);
-                    if (sanitizeBeforeSave(found)) {
-                        toSave.add(found);
-                    }
-                } else {
-                    e.addMPN(mpn);
-                    if (sanitizeBeforeSave(e)) {
-                        toSave.add(e);
-                    }
-                }
-            }
-
-            for (String ean : e.getEANs()) {
-                HARDWARE foundByEan = notBlank(ean) ? byEanMap.get(ean) : null;
-
-                HARDWARE found = firstNonNull(foundByEan);
-                if (found != null) {
-                    if (foundByEan != null && !(foundByEan.getId() == found.getId())) {
-                        throw new IllegalStateException("Conflict in mergeAll: EAN/UPC/MPN are referencing distinct data entries.");
-                    }
-                    found.merge(e);
-                    if (sanitizeBeforeSave(found)) {
-                        toSave.add(found);
-                    }
-                } else {
-                    e.addEAN(ean);
-                    if (sanitizeBeforeSave(e)) {
-                        toSave.add(e);
-                    }
-                }
-            }
-        }
-
-        // 4) Bulk-save
-        return repo.saveAll(toSave);
-    }
-
-    public static Set<String> getAllKnownManufacturers() {
-        return normalizedManufacturers;
+    public Set<String> getAllKnownManufacturersSnapshot() {
+        // defensive copy for callers
+        return Set.copyOf(normalizedManufacturers);
     }
 
     public static String normalizeModel(String s) {
@@ -593,24 +644,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         return n;
     }
 
-
-    private static <T> T firstNonNull(T... ts) {
-        for (T t : ts) if (t != null) return t;
-        return null;
-
-    }
-
-    public static boolean notBlank(String s) {
-        return s != null && !s.isBlank();
-    }
-
     @Override
     @Transactional
-    public void onScrape(HardwareSpec scrapedHardware) {
-        if (scrapedHardware.getManufacturer() != null) {
-            normalizedManufacturers.add(scrapedHardware.getManufacturer().trim().toLowerCase(Locale.ROOT));
+    public void onScrape(HardwareSpec<?> scrapedHardware) {
+        if (scrapedHardware != null && scrapedHardware.getManufacturer() != null) {
+            rememberManufacturer(scrapedHardware.getManufacturer());
         }
-        //saveHardware(scrapedHardware);
     }
 
     @Override
@@ -620,12 +659,26 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         long start = System.currentTimeMillis();
         try {
             saveHardwareBatch(scrapedHardware);
-        }
-        catch (Throwable ex) {
+        } catch (Throwable ex) {
             ex.printStackTrace();
         }
         LOGGER.info("\tTook " + (System.currentTimeMillis() - start) + " ms");
     }
 
+    public Long countByType(Class<? extends HardwareSpec<?>> hardwareType) {
+        return baseRepo.countByType(hardwareType);
+    }
 
+    private static void afterCommit(Runnable r) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            r.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                r.run();
+            }
+        });
+    }
 }
