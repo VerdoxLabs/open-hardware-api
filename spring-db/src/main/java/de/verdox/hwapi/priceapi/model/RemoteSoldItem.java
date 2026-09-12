@@ -34,7 +34,10 @@ import java.util.UUID;
         indexes = {
                 // WICHTIG: physische Spaltennamen verwenden!
                 @Index(name = "idx_rsi_ean", columnList = "ean"),
-                @Index(name = "idx_rsi_ean_sellprice", columnList = "ean,sell_price")
+                @Index(name = "idx_rsi_ean_sellprice", columnList = "ean,sell_price"),
+                // Deckt die Hot-Queries ab: ean [+currency] + sell_date >= from
+                @Index(name = "idx_rsi_ean_currency_sell_date", columnList = "ean,currency,sell_date"),
+                @Index(name = "idx_rsi_spec_id", columnList = "hardware_spec_id")
         }
 )
 @ToString
@@ -68,6 +71,15 @@ public class RemoteSoldItem {
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Column(name = "condition")
     private ItemCondition condition;
+
+    /**
+     * Logischer Verweis auf die HardwareSpec (Catalog) – bewusst ohne FK.
+     * Ermöglicht Joins auf den Catalog, ohne die Deterministik des UUID-PKs zu
+     * berühren (wird bei Bedarf nachträglich gesetzt).
+     */
+    @JsonIgnore
+    @Column(name = "hardware_spec_id")
+    private Long hardwareSpecId;
 
     public RemoteSoldItem(String marketPlaceDomain, String marketPlaceItemID, String ean,
                           BigDecimal sellPrice, Currency currency, LocalDate sellDate, ItemCondition itemCondition) {

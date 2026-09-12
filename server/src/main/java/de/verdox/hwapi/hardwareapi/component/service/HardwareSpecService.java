@@ -63,6 +63,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             RAMRepository ramRepository,
             StorageRepository storageRepository,
             DisplayRepository displayRepository,
+            FanRepository fanRepository,
             ProductRegistryService productRegistryService
     ) {
         this.baseRepo = baseRepo;
@@ -78,6 +79,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         repoByType.put(RAM.class, ramRepository);
         repoByType.put(Storage.class, storageRepository);
         repoByType.put(Display.class, displayRepository);
+        repoByType.put(Fan.class, fanRepository);
 
         this.cache = cache;
 

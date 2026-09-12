@@ -5,6 +5,8 @@ import de.verdox.hwapi.productid.ProductIdentifierRepository;
 import de.verdox.hwapi.productid.ProductIdentity;
 import de.verdox.hwapi.productid.ProductIdentityRepository;
 import de.verdox.hwapi.productid.dto.ProductSearchResultDTO;
+import de.verdox.hwapi.util.C2CTitleCleaner;
+import de.verdox.hwapi.util.ComponentTypeClassifier;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.text.similarity.JaroWinklerSimilarity;
 import org.springframework.stereotype.Service;
@@ -123,6 +125,59 @@ ProductRegistryService {
     }
 
     // ------------------------------------------------------------------------
+    // C2C-Suche (Kleinanzeigen & Co.): erst Rauschen weg, dann Matchen
+    // ------------------------------------------------------------------------
+
+    /**
+     * C2C-Variante von {@link #findBestMatch(String)}. Der rohe Inseratstitel wird zuerst
+     * mit {@link C2CTitleCleaner} von Verkaufs-/Zustands-/Marketingbegriffen befreit,
+     * bevor er gematcht wird. Damit bleiben die exakten {@code TITLE_NORMALIZED}
+     * Treffer der Lernschleife konsistent – vorausgesetzt, auch die Registrierung
+     * ({@link #registerC2CTitle}) wendet denselben Cleaner an.
+     */
+    @Transactional(readOnly = true)
+    public Optional<BestMatch> findBestMatchC2C(String rawTitle) {
+        String cleaned = C2CTitleCleaner.clean(rawTitle);
+        if (cleaned == null || cleaned.isBlank()) {
+            return Optional.empty();
+        }
+        return findBestMatch(cleaned);
+    }
+
+    /**
+     * C2C-Variante von {@link #searchAggregated(String)}. Siehe {@link #findBestMatchC2C}.
+     * Das Ergebnis fasst wie gewöhnlich alle Identifier der besten Identity zusammen.
+     */
+    @Transactional(readOnly = true)
+    public Optional<AggregatedSearchResult> searchAggregatedC2C(String rawTitle) {
+        String cleaned = C2CTitleCleaner.clean(rawTitle);
+        if (cleaned == null || cleaned.isBlank()) {
+            return Optional.empty();
+        }
+        return searchAggregated(cleaned);
+    }
+
+    /**
+     * Registriert einen <b>bestätigten</b> C2C-Titel in der Registry und liefert den
+     * {@code TITLE_NORMALIZED}-Identifier zurück, dessen Identity die Lernschleife dann auf
+     * die bestätigte Produkt-Identity zeigen lassen muss.
+     *
+     * <p>Konsistenz-Garantie: Der Titel wird identisch zu {@link #searchAggregatedC2C}
+     * normalisiert ({@code normalizeTitle(clean(raw))}), damit derselbe wiederkehrende
+     * Titel beim nächsten C2C-Lauf ein <b>exakter</b> 1.0-Treffer wird – das ist der
+     * Lerneffekt. Der rohe {@code TITLE}-Identifier wird zusätzlich für die Anzeige
+     * gespeichert (ohne Normalisierung).
+     *
+     * @return der gespeicherte {@code TITLE_NORMALIZED}-Identifier (Identity noch leer)
+     */
+    @Transactional
+    public ProductIdentifier registerC2CTitle(String rawTitle, String source) {
+        String cleaned = C2CTitleCleaner.clean(rawTitle);
+        register(ProductIdentifier.IdentifierType.TITLE, rawTitle, source);
+        return register(ProductIdentifier.IdentifierType.TITLE_NORMALIZED, cleaned, source);
+    }
+
+    // ------------------------------------------------------------------------
     // Interne Matching-Logik: ALLE relevanten Treffer
     // ------------------------------------------------------------------------
 
@@ -188,8 +243,19 @@ ProductRegistryService {
 
             String queryDigits = extractMainDigits(normalizedTitle);
 
+            // Type-Gating: eine konkrete Komponentenart in der Query (z.B. "grafikkarte rtx 4070")
+            // soll keine andere konkrete Art matchen (z.B. keine CPU). PC/OTHER/UNKNOWN bleiben
+            // durchlässig, damit Bundles und unklare Titel nicht unnötig gefiltert werden.
+            ComponentTypeClassifier.ComponentKind queryKind =
+                    ComponentTypeClassifier.classify(normalizedTitle);
+
             for (ProductIdentifier candidate : candidates) {
                 String candidateValue = candidate.getIdentifier();
+
+                if (queryKind.isComponentType()
+                        && !queryKind.equals(ComponentTypeClassifier.classify(candidateValue))) {
+                    continue;
+                }
 
                 String a = normalizedTitle;
                 String b = candidateValue;
@@ -276,6 +342,56 @@ ProductRegistryService {
             identifiers.add(titleNormId);
         }
 
+        return mergeIdentifiersIntoIdentity(identifiers);
+    }
+
+    /**
+     * Bestätigt einen C2C-Titel (Lernschleife): registriert die bestätigten Codes
+     * (EAN/MPN) und den Titel und fasst ALLES in einer Identity zusammen.
+     *
+     * <p>Titel-Normalisierung ist C2C-konsistent ({@code C2CTitleCleaner} +
+     * {@code normalizeTitle}), sodass derselbe wiederkehrende Titel bei einer
+     * {@link #searchAggregatedC2C}-Suche künftig ein <b>exakter 1.0-Treffer</b>
+     * wird – der Algorithmus lernt aus jeder Bestätigung.
+     *
+     * @param rawTitle roher C2C-Titel
+     * @param eans     bestätigte EAN(s); null/leer erlaubt (nur-Titel-Bestätigung)
+     * @param mpns     bestätigte MPN(s); null/leer erlaubt
+     * @param source   z. B. "KLEINANZEIGEN"
+     * @return die (ggf. neu geschaffene bzw. gemergte) Identity
+     */
+    @Transactional
+    public ProductIdentity confirmC2cTitle(String rawTitle, Collection<String> eans,
+                                           Collection<String> mpns, String source) {
+        List<ProductIdentifier> identifiers = new ArrayList<>();
+
+        if (eans != null && !eans.isEmpty()) {
+            identifiers.addAll(
+                    registerAll(ProductIdentifier.IdentifierType.EAN, eans, source).values()
+            );
+        }
+
+        if (mpns != null && !mpns.isEmpty()) {
+            identifiers.addAll(
+                    registerAll(ProductIdentifier.IdentifierType.MPN, mpns, source).values()
+            );
+        }
+
+        ProductIdentifier titleId = register(ProductIdentifier.IdentifierType.TITLE, rawTitle, source);
+        ProductIdentifier titleNormId =
+                register(ProductIdentifier.IdentifierType.TITLE_NORMALIZED, C2CTitleCleaner.clean(rawTitle), source);
+        identifiers.add(titleId);
+        identifiers.add(titleNormId);
+
+        return mergeIdentifiersIntoIdentity(identifiers);
+    }
+
+    /**
+     * Fasst die Identifiers in genau einer Identity zusammen:
+     * keine vorhanden → neue Identity; genau eine → übernehmen; mehrere → mergen
+     * (alle Identifier der Verlierer-Identities zur Ziel-Identity umhängen).
+     */
+    private ProductIdentity mergeIdentifiersIntoIdentity(List<ProductIdentifier> identifiers) {
         Set<ProductIdentity> existingIdentities = identifiers.stream()
                 .map(ProductIdentifier::getIdentity)
                 .filter(Objects::nonNull)

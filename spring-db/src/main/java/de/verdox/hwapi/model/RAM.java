@@ -35,6 +35,8 @@ public class RAM extends HardwareSpec<RAM> {
         mergeNumber(other, RAM::getRowAddressToColumnAddressDelay, RAM::setRowAddressToColumnAddressDelay);
         mergeNumber(other, RAM::getRowPrechargeTime, RAM::setRowPrechargeTime);
         mergeNumber(other, RAM::getRowActiveTime, RAM::setRowActiveTime);
+        mergeEnum(other, RAM::getRank, RAM::setRank, HardwareTypes.RamRank.UNKNOWN);
+        mergeEnum(other, RAM::getProfile, RAM::setProfile, HardwareTypes.RamProfile.UNKNOWN);
         mergeSet(other, RAM::getColors, RAM::setColors);
     }
 
@@ -73,6 +75,16 @@ public class RAM extends HardwareSpec<RAM> {
     private Integer rowPrechargeTime = 0; // TRP
     @PositiveOrZero
     private Integer rowActiveTime = 0; // TRAS
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "rank", nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.RamRank rank = HardwareTypes.RamRank.UNKNOWN;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "profile", nullable = false)
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.RamProfile profile = HardwareTypes.RamProfile.UNKNOWN;
 
     @Column(name = "is_ecc", nullable = false)
     private boolean isECC = false;

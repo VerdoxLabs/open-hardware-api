@@ -33,6 +33,11 @@ public class PCCase extends HardwareSpec<PCCase> {
         mergeSet(other, PCCase::getMotherboardSupport, PCCase::setMotherboardSupport);
         mergeNumber(other, PCCase::getMaxGpuLengthMm, PCCase::setMaxGpuLengthMm);
         mergeNumber(other, PCCase::getMaxCpuCoolerHeightMm, PCCase::setMaxCpuCoolerHeightMm);
+        mergeNumber(other, PCCase::getMaxAioRadiatorMm, PCCase::setMaxAioRadiatorMm);
+        mergeNumber(other, PCCase::getFanMountsFront, PCCase::setFanMountsFront);
+        mergeNumber(other, PCCase::getFanMountsTop, PCCase::setFanMountsTop);
+        mergeNumber(other, PCCase::getFanMountsRear, PCCase::setFanMountsRear);
+        mergeBool(other, PCCase::getHasFrontUsbC, PCCase::setHasFrontUsbC);
         mergeSet(other, PCCase::getColors, PCCase::setColors);
     }
 
@@ -58,6 +63,25 @@ public class PCCase extends HardwareSpec<PCCase> {
 
     @PositiveOrZero
     private double maxCpuCoolerHeightMm = 0;
+
+    @PositiveOrZero
+    @Column(name = "max_aio_radiator_mm")
+    private int maxAioRadiatorMm = 0;
+
+    @PositiveOrZero
+    @Column(name = "fan_mounts_front")
+    private int fanMountsFront = 0;
+
+    @PositiveOrZero
+    @Column(name = "fan_mounts_top")
+    private int fanMountsTop = 0;
+
+    @PositiveOrZero
+    @Column(name = "fan_mounts_rear")
+    private int fanMountsRear = 0;
+
+    @Column(name = "has_front_usb_c")
+    private Boolean hasFrontUsbC = false;
 
     @ElementCollection
     @CollectionTable(name = "pccase_color", joinColumns = @JoinColumn(name = "pccase_id"))

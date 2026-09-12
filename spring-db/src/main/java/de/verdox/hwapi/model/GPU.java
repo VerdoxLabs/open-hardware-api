@@ -48,6 +48,12 @@ public class GPU extends HardwareSpec<GPU> {
         mergeEnum(other, GPU::getVramType, GPU::setVramType, HardwareTypes.VRAM_TYPE.UNKNOWN);
         mergeNumber(other, GPU::getVramGb, GPU::setVramGb);
         mergeNumber(other, GPU::getTdp, GPU::setTdp);
+        mergeNumber(other, GPU::getBaseClockMhz, GPU::setBaseClockMhz);
+        mergeNumber(other, GPU::getBoostClockMhz, GPU::setBoostClockMhz);
+        mergeNumber(other, GPU::getMemoryBusWidthBit, GPU::setMemoryBusWidthBit);
+        mergeNumber(other, GPU::getRecommendedPsuWatts, GPU::setRecommendedPsuWatts);
+        mergeNumber(other, GPU::getSlotWidth, GPU::setSlotWidth);
+        mergeNumber(other, GPU::getFanCount, GPU::setFanCount);
         mergeSet(other, GPU::getColors, GPU::setColors);
         merge(other, GPU::getGpuCanonicalName, GPU::setGpuCanonicalName, s -> s == null || s.isBlank() || s.equals("unknown"));
     }
@@ -81,6 +87,30 @@ public class GPU extends HardwareSpec<GPU> {
 
     private double tdp = 0;
 
+    @PositiveOrZero
+    @Column(name = "base_clock_mhz")
+    private double baseClockMhz = 0;
+
+    @PositiveOrZero
+    @Column(name = "boost_clock_mhz")
+    private double boostClockMhz = 0;
+
+    @PositiveOrZero
+    @Column(name = "memory_bus_width_bit")
+    private int memoryBusWidthBit = 0;
+
+    @PositiveOrZero
+    @Column(name = "recommended_psu_watts")
+    private int recommendedPsuWatts = 0;
+
+    @PositiveOrZero
+    @Column(name = "slot_width")
+    private double slotWidth = 0;
+
+    @PositiveOrZero
+    @Column(name = "fan_count")
+    private int fanCount = 0;
+
     @ElementCollection
     @CollectionTable(name="gpu_color", joinColumns=@JoinColumn(name="gpu_id"))
     @Column(name="color", nullable=false)
@@ -113,6 +143,9 @@ public class GPU extends HardwareSpec<GPU> {
                 ", vramType=" + vramType +
                 ", vramGb=" + vramGb +
                 ", tdp=" + tdp +
+                ", baseClockMhz=" + baseClockMhz +
+                ", boostClockMhz=" + boostClockMhz +
+                ", memoryBusWidthBit=" + memoryBusWidthBit +
                 ", manufacturer='" + manufacturer + '\'' +
                 ", model='" + model + '\'' +
                 ", EAN='" + EANs + '\'' +

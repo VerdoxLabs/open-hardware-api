@@ -36,6 +36,10 @@ public class CPU extends HardwareSpec<CPU> {
         mergeNumber(other, CPU::getBoostClockMhz, CPU::setBoostClockMhz);
         mergeNumber(other, CPU::getL3CacheMb, CPU::setL3CacheMb);
         mergeNumber(other, CPU::getTdpWatts, CPU::setTdpWatts);
+        mergeNumber(other, CPU::getProcessNodeNm, CPU::setProcessNodeNm);
+        mergeNumber(other, CPU::getMemoryBandwidthGbps, CPU::setMemoryBandwidthGbps);
+        mergeNumber(other, CPU::getMemoryChannels, CPU::setMemoryChannels);
+        mergeEnum(other, CPU::getMemoryType, CPU::setMemoryType, HardwareTypes.RamType.UNKNOWN);
     }
 
     @Enumerated(EnumType.STRING)
@@ -88,6 +92,23 @@ public class CPU extends HardwareSpec<CPU> {
 
     @PositiveOrZero
     private int tdpWatts = 0;
+
+    @PositiveOrZero
+    @Column(name = "process_node_nm")
+    private int processNodeNm = 0;
+
+    @PositiveOrZero
+    @Column(name = "memory_bandwidth_gbps")
+    private double memoryBandwidthGbps = 0;
+
+    @PositiveOrZero
+    @Column(name = "memory_channels")
+    private int memoryChannels = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "memory_type")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.RamType memoryType = HardwareTypes.RamType.UNKNOWN;
 
     @Override
     public String toString() {

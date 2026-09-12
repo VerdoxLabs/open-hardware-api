@@ -24,7 +24,8 @@ import java.util.UUID;
                 @Index(name = "idx_ral_ean", columnList = "ean"),
                 @Index(name = "idx_ral_mpn", columnList = "mpn"),
                 @Index(name = "idx_ral_last_seen", columnList = "last_seen_at"),
-                @Index(name = "idx_ral_active", columnList = "still_active")
+                @Index(name = "idx_ral_active", columnList = "still_active"),
+                @Index(name = "idx_ral_spec_id", columnList = "hardware_spec_id")
         }
 )
 public class RemoteActiveListing {
@@ -73,6 +74,25 @@ public class RemoteActiveListing {
 
     @Column(name = "still_active", nullable = false)
     private boolean stillActive = true;
+
+    /**
+     * Logischer Verweis auf die HardwareSpec (Catalog) – bewusst ohne FK,
+     * um die bestehende EAN/MPN-Kopplung nicht zu erzwingen und Upserts ohne
+     * Spec-Lookup zu ermöglichen. Ggf. nachträglich gesetzt.
+     */
+    @Column(name = "hardware_spec_id")
+    private Long hardwareSpecId;
+
+    /**
+     * Herleitung der Katalog-Zuordnung (C2C-Lernschleife): z. B. "C2C_AUTO"
+     * (ungeprüfter Tier-1-Fuzzy-Titel) oder "C2C_CONFIRMED" (bestätigter Titel).
+     */
+    @Column(name = "match_source")
+    private String matchSource;
+
+    /** Matching-Konfidenz (0..1) zum Zeitpunkt der Zuordnung; null = nicht aus C2C gematcht. */
+    @Column(name = "match_confidence")
+    private Double matchConfidence;
 
     @PrePersist
     public void onCreate() {

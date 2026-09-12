@@ -40,7 +40,6 @@ public class HardwareSpecCache {
 
     public void put(HardwareSpec<?> spec) {
         if (spec == null) return;
-/*
         byId.put(spec.getId(), spec);
 
         if (spec.getEANs() != null) {
@@ -52,12 +51,11 @@ public class HardwareSpecCache {
             for (String m : spec.getMPNs()) {
                 if (m != null) byKey.put(norm(m), spec);
             }
-        }*/
+        }
     }
 
     public void evict(HardwareSpec<?> spec) {
         if (spec == null) return;
-/*
         byId.invalidate(spec.getId());
 
         if (spec.getEANs() != null) {
@@ -69,7 +67,7 @@ public class HardwareSpecCache {
             for (String m : spec.getMPNs()) {
                 if (m != null) byKey.invalidate(norm(m));
             }
-        }*/
+        }
     }
 
     public void clear() {

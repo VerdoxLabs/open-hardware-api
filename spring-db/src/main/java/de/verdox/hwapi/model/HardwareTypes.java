@@ -216,14 +216,14 @@ public class HardwareTypes {
      * Ethernet-Geschwindigkeit
      */
     @JsonFormat(shape = JsonFormat.Shape.STRING)
-    public enum EthernetSpeed {ETH_1G, ETH_2_5G, ETH_5G, ETH_10G}
+    public enum EthernetSpeed {UNKNOWN, ETH_1G, ETH_2_5G, ETH_5G, ETH_10G}
 
 
     /**
      * WLAN-Standard
      */
     @JsonFormat(shape = JsonFormat.Shape.STRING)
-    public enum WifiStandard {WIFI4_80211N, WIFI5_80211AC, WIFI6_80211AX, WIFI6E_80211AX_6GHZ, WIFI7_80211BE}
+    public enum WifiStandard {UNKNOWN, WIFI4_80211N, WIFI5_80211AC, WIFI6_80211AX, WIFI6E_80211AX_6GHZ, WIFI7_80211BE}
 
 
     /**
@@ -231,4 +231,72 @@ public class HardwareTypes {
      */
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     public enum DisplayOutputType {HDMI, DISPLAYPORT, DVI, VGA}
+
+    /**
+     * Formfaktor von Speichermedien (SSD/HDD).
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum StorageFormFactor {
+        UNKNOWN, M_2_2280, M_2_2242, M_2_2230, M_2_22110, TWO_POINT_FIVE_INCH, ONE_POINT_EIGHT_INCH, THREE_POINT_INCH
+    }
+
+    /**
+     * NAND-Flash-Cell-Typ eines SSDs.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum NandType {
+        UNKNOWN, SLC, MLC, TLC, QLC
+    }
+
+    /**
+     * NVMe-Spezifikationsversion eines NVMe-SSD.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum NvmExpressVersion {
+        UNKNOWN, V1_0, V1_2, V1_3, V1_4, V2_0
+    }
+
+    /**
+     * Architektur-Generation einer GPU (vendor-übergreifend, grob).
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum GpuArchitecture {
+        UNKNOWN, LEGACY,
+        // NVIDIA
+        FERMI, KEPLER, MAXWELL, PASCAL, VOLTA, TURING, AMPERE, ADA_LOVELACE, HOPPER, BLACKWELL,
+        // AMD
+        POLARIS, VEGA, RDNA, RDNA2, RDNA3, RDNA4
+    }
+
+    /**
+     * Rank-Aufbau eines RAM-Moduls.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum RamRank {
+        UNKNOWN, SINGLE_RANK, DUAL_RANK, QUAD_RANK
+    }
+
+    /**
+     * Timing-Profil / Übertaktungs-Standard eines RAM-Moduls.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum RamProfile {
+        UNKNOWN, JEDEC, XMP, EXPO
+    }
+
+    /**
+     * HDR-Standards eines Displays.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum HdrStandard {
+        UNKNOWN, NONE, HDR10, HDR10_PLUS, DOLBY_VISION, HLG
+    }
+
+    /**
+     * Stecker-/Anschluss-Typ eines (Gehäuse-)Lüfters.
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    public enum FanConnectorType {
+        UNKNOWN, THREE_PIN, FOUR_PIN_PWM
+    }
 }

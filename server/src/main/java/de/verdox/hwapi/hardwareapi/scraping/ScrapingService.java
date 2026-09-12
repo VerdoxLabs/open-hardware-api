@@ -34,14 +34,9 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 @Service
-@Component
 public class ScrapingService {
 
     public static final Logger LOGGER = Logger.getLogger(ScrapingService.class.getSimpleName());
-
-    /* ------------------------------------------------------------
-     * Progress / Status (Admin API)
-     * ------------------------------------------------------------ */
 
     private final AtomicReference<Instant> startedAt = new AtomicReference<>();
     private final AtomicReference<Instant> lastFinishedAt = new AtomicReference<>();
@@ -115,6 +110,11 @@ public class ScrapingService {
         list.addAll(PCBuilderIOScrapers.create(hardwareSpecService).buildScrapers());
         list.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
         return list;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void startScrapingOnStart() {
+        executeJob(1);
     }
 
     @Scheduled(cron = "0 0 2 * * *", zone = "Europe/Berlin")

@@ -38,6 +38,9 @@ public class Display extends HardwareSpec<Display> {
         mergeNumber(other, Display::getInchSize, Display::setInchSize);
         mergeNumber(other, Display::getResWidth, Display::setResWidth);
         mergeNumber(other, Display::getResHeight, Display::setResHeight);
+        mergeNumber(other, Display::getBrightnessNits, Display::setBrightnessNits);
+        mergeNumber(other, Display::getPanelBitDepth, Display::setPanelBitDepth);
+        mergeEnumCollection(other, Display::getHdrStandards);
         mergeBool(other, Display::getIntegratedSpeakers, Display::setIntegratedSpeakers);
         mergeBool(other, Display::getCurved, Display::setCurved);
         mergeBool(other, Display::getAdjustableSize, Display::setAdjustableSize);
@@ -79,6 +82,21 @@ public class Display extends HardwareSpec<Display> {
 
     @PositiveOrZero
     private Integer resHeight = 0;
+
+    @PositiveOrZero
+    @Column(name = "brightness_nits")
+    private Integer brightnessNits = 0;
+
+    @PositiveOrZero
+    @Column(name = "panel_bit_depth")
+    private Integer panelBitDepth = 0;
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "display_hdr_standards", joinColumns = @JoinColumn(name = "spec_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "hdr_standard")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Set<HardwareTypes.HdrStandard> hdrStandards = new HashSet<>();
 
     private Boolean integratedSpeakers = false;
 

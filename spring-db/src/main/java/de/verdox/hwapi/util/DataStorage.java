@@ -1,20 +1,20 @@
 package de.verdox.hwapi.util;
 
-import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
-
 import java.nio.file.Path;
+import java.util.logging.Logger;
 
 public class DataStorage {
+    public static final Logger LOGGER = Logger.getLogger(DataStorage.class.getName());
     private static final String OS = System.getProperty("os.name").toLowerCase();
     public static boolean isWindows = OS.contains("win");
     public static boolean isLinux = OS.contains("nix") || OS.contains("nux") || OS.contains("aix");
 
     static {
         if(isLinux) {
-            ScrapingService.LOGGER.info("Found Linux OS");
+            LOGGER.info("Found Linux OS");
         }
         else if(isWindows) {
-            ScrapingService.LOGGER.info("Found Windows OS");
+            LOGGER.info("Found Windows OS");
         }
     }
 

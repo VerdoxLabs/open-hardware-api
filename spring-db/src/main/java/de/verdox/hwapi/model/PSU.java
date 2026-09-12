@@ -32,6 +32,9 @@ public class PSU extends HardwareSpec<PSU> {
         mergeEnum(other, PSU::getEfficiencyRating, PSU::setEfficiencyRating, HardwareTypes.PsuEfficiencyRating.UNKNOWN);
         mergeEnum(other, PSU::getModularity, PSU::setModularity, HardwareTypes.PSU_MODULARITY.UNKNOWN);
         mergeEnum(other, PSU::getSize, PSU::setSize, HardwareTypes.PSUFormFactor.UNKNOWN);
+        mergeNumber(other, PSU::getRail12vCurrent, PSU::setRail12vCurrent);
+        mergeBool(other, PSU::getIsFanless, PSU::setIsFanless);
+        mergeBool(other, PSU::getIs8Plus4Pin, PSU::setIs8Plus4Pin);
         mergeSet(other, PSU::getConnectors,  PSU::setConnectors);
         mergeSet(other, PSU::getColors, PSU::setColors);
     }
@@ -54,6 +57,16 @@ public class PSU extends HardwareSpec<PSU> {
     private HardwareTypes.PSUFormFactor size = HardwareTypes.PSUFormFactor.UNKNOWN;
 
     private Float psuPowerVersion = 3.0F;
+
+    @PositiveOrZero
+    @Column(name = "rail_12v_current")
+    private double rail12vCurrent = 0;
+
+    @Column(name = "is_fanless")
+    private Boolean isFanless = false;
+
+    @Column(name = "is_8_plus_4_pin")
+    private Boolean is8Plus4Pin = false;
 
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "psu_connectors", joinColumns = @JoinColumn(name = "spec_id"), uniqueConstraints = @UniqueConstraint(columnNames = {"SPEC_ID", "TYPE"}))

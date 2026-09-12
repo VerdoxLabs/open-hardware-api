@@ -41,6 +41,8 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
         mergeEnumCollection(other, CPUCooler::getSupportedSockets);
         mergeNumber(other, CPUCooler::getRadiatorLengthMm, CPUCooler::setRadiatorLengthMm);
         mergeNumber(other, CPUCooler::getTdpWatts, CPUCooler::setTdpWatts);
+        mergeEnum(other, CPUCooler::getFanConnectorType, CPUCooler::setFanConnectorType, HardwareTypes.FanConnectorType.UNKNOWN);
+        mergeBool(other, CPUCooler::getHasRgb, CPUCooler::setHasRgb);
         mergeSet(other, CPUCooler::getColors, CPUCooler::setColors);
         mergeNumber(other, CPUCooler::getFanRPM, CPUCooler::setFanRPM);
         mergeNumber(other, CPUCooler::getNoiseLevelDB, CPUCooler::setNoiseLevelDB);
@@ -70,6 +72,13 @@ public class CPUCooler extends HardwareSpec<CPUCooler> {
     @PositiveOrZero
     @Column(name = "noise_level_db")
     private Double noiseLevelDB = 0D;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fan_connector_type")
+    private HardwareTypes.FanConnectorType fanConnectorType = HardwareTypes.FanConnectorType.UNKNOWN;
+
+    @Column(name = "has_rgb")
+    private Boolean hasRgb = false;
 
     @ElementCollection
     @CollectionTable(name="cpucooler_color", joinColumns=@JoinColumn(name="cpucooler_id"))

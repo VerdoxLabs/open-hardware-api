@@ -57,6 +57,11 @@ public class Motherboard extends HardwareSpec<Motherboard> {
         mergeSet(other, Motherboard::getPcieSlots,  Motherboard::setPcieSlots);
         mergeSet(other, Motherboard::getUsbPort,  Motherboard::setUsbPort);
         mergeNumber(other, Motherboard::getUsb3Headers, Motherboard::setUsb3Headers);
+        mergeEnum(other, Motherboard::getWlanStandard, Motherboard::setWlanStandard, HardwareTypes.WifiStandard.UNKNOWN);
+        mergeEnum(other, Motherboard::getEthernetSpeed, Motherboard::setEthernetSpeed, HardwareTypes.EthernetSpeed.UNKNOWN);
+        mergeSet(other, Motherboard::getDisplayOutputs, Motherboard::setDisplayOutputs);
+        mergeBool(other, Motherboard::getHasBluetooth, Motherboard::setHasBluetooth);
+        mergeBool(other, Motherboard::getHasFrontUsbC, Motherboard::setHasFrontUsbC);
         mergeSet(other, Motherboard::getColors, Motherboard::setColors);
     }
 
@@ -111,6 +116,29 @@ public class Motherboard extends HardwareSpec<Motherboard> {
     @CollectionTable(name="motherboard_color", joinColumns=@JoinColumn(name="motherboard_id"))
     @Column(name="color", nullable=false)
     private Set<String> colors = new HashSet<>();
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "wlan_standard")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.WifiStandard wlanStandard = HardwareTypes.WifiStandard.UNKNOWN;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ethernet_speed")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private HardwareTypes.EthernetSpeed ethernetSpeed = HardwareTypes.EthernetSpeed.UNKNOWN;
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "motherboard_display_outputs", joinColumns = @JoinColumn(name = "spec_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "output_type")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Set<HardwareTypes.DisplayOutputType> displayOutputs = new HashSet<>();
+
+    @Column(name = "has_bluetooth")
+    private Boolean hasBluetooth = false;
+
+    @Column(name = "has_front_usb_c")
+    private Boolean hasFrontUsbC = false;
 
     public void addOrMerge(USBPort incoming) {
         if (incoming == null) return;
