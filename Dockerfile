@@ -10,10 +10,10 @@ LABEL org.opencontainers.image.version=$VERSION \
 
 ENV HOME=/app
 WORKDIR $HOME
-COPY .. .
+COPY . .
 
 RUN --mount=type=cache,target=/root/.m2 \
-    ./mvnw clean package -DskipTests
+    ./mvnw -pl server -am clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-alpine
 

@@ -29,16 +29,6 @@
     </properties>
     <dependencies>
         <dependency>
-            <groupId>de.verdox.open-hardware-api</groupId>
-            <artifactId>client</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>de.verdox.open-hardware-api</groupId>
-            <artifactId>spring-db</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
@@ -86,17 +76,6 @@
             <artifactId>jakarta.validation-api</artifactId>
             <version>3.1.1</version>
         </dependency>
-<!--        <dependency>
-            <groupId>com.amazon.paapi5</groupId>
-            <artifactId>paapi5-java-sdk</artifactId>
-            <version>1.2.4</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.squareup.okio</groupId>
-                    <artifactId>okio</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>-->
         <dependency>
             <groupId>com.squareup.okio</groupId>
             <artifactId>okio</artifactId>

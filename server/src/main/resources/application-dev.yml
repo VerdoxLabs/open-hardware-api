@@ -18,4 +18,4 @@ spring:
     enabled: false
     locations: classpath:db/h2
 
-logging.level.de.verdox.hwapi.hardwareapi.component.service.de.verdox.hwapi.hardwareapi.scraping.ScrapingService: DEBUG
+logging.level.de.verdox.hwapi.catalog.ingestion.ScrapingService: DEBUG

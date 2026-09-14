@@ -9,6 +9,83 @@ services:
       - db-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcparts -d pcparts"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  webscraper-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: webscraper
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - webscraper-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d webscraper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  webscraper-camoufox:
+    build:
+      context: ../web-scraper-api/camoufox
+      dockerfile: Dockerfile
+    image: webscraper-camoufox:local
+    shm_size: "1gb"
+    # Optional acceleration/stealth backend. The API also works without this service and falls
+    # back to its bundled/local Chromium runtime.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',1234),2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  webscraper-api:
+    build:
+      context: ../web-scraper-api
+      dockerfile: Dockerfile
+    image: webscraper-api:local
+    depends_on:
+      webscraper-db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_URL: jdbc:postgresql://webscraper-db:5432/webscraper
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      API_KEYS: ${WEBSCRAPER_API_KEY:-dev-key-change-me}
+      EXPORT_DIR: /app/exports
+      CAMOUFOX_WS_ENDPOINT: ws://webscraper-camoufox:1234/camoufox
+    ports:
+      - "8090:8080"
+    shm_size: "512mb"
+    volumes:
+      - webscraper-exports:/app/exports
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  webscraper-frontend:
+    build:
+      context: ../web-scraper-api/demo-frontend
+      dockerfile: Dockerfile
+    image: webscraper-frontend:local
+    depends_on:
+      webscraper-api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://webscraper-api:8080
+      API_KEY: ${WEBSCRAPER_API_KEY:-dev-key-change-me}
+    ports:
+      - "3001:3000"
+
   selenium:
     image: selenium/standalone-all-browsers:latest
     shm_size: 2g
@@ -20,10 +97,17 @@ services:
       - SE_NODE_MAX_SESSIONS=16
 
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: verdox/open-hardware-api:latest
     depends_on:
-      - db
-      - selenium
+      db:
+        condition: service_healthy
+      selenium:
+        condition: service_started
+      webscraper-api:
+        condition: service_healthy
     user: "0:1000"
     environment:
       SPRING_PROFILES_ACTIVE: prod
@@ -31,10 +115,27 @@ services:
       SPRING_DATASOURCE_USERNAME: pcparts
       SPRING_DATASOURCE_PASSWORD: pcparts
       SELENIUM_REMOTE_URL: http://selenium:4444/wd/hub
+      HWAPI_SCRAPER_BACKEND: ${HWAPI_SCRAPER_BACKEND:-webscraper}
+      WEBSCRAPER_API_URL: http://webscraper-api:8080
+      WEBSCRAPER_API_KEY: ${WEBSCRAPER_API_KEY:-dev-key-change-me}
+      WEBSCRAPER_ENGINE: ${WEBSCRAPER_ENGINE:-auto}
     ports:
       - "5050:8080"
     volumes:
       - "./open-hardware-api:/var/lib/open-hardware-api"
 
+  frontend:
+    build:
+      context: ./database-frontend
+      dockerfile: Dockerfile
+    image: open-hardware-frontend:local
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "3000:80"
+
 volumes:
   db-data:
+  webscraper-db-data:
+  webscraper-exports:

@@ -28,6 +28,16 @@ sync:
     all-or-nothing: false
     max-batch-size: 200
 
+hwapi:
+  scraping:
+    # selenium = legacy RemoteWebDriver, webscraper = the new Webscraper API
+    backend: ${HWAPI_SCRAPER_BACKEND:selenium}
+    webscraper:
+      base-url: ${WEBSCRAPER_API_URL:http://localhost:8090}
+      api-key: ${WEBSCRAPER_API_KEY:dev-key-change-me}
+      engine: ${WEBSCRAPER_ENGINE:auto}
+      timeout: ${WEBSCRAPER_TIMEOUT:120s}
+
 spring.jpa.properties.hibernate.default_batch_fetch_size: 64
 
 spring.jpa.properties.hibernate.jdbc.batch_size: 50
@@ -42,27 +52,6 @@ logging.level.org.asynchttpclient: WARN
 
 logging.level.com.ebay.feed.api: DEBUG
 
-
-amazon:
-  paapi:
-    marketplaces:
-      DE:
-        enabled: true
-        access-key: ${AMAZON_PAAPI_DE_ACCESS_KEY}
-        secret-key: ${AMAZON_PAAPI_DE_SECRET_KEY}
-        partner-tag: verdox-21
-
-      US:
-        enabled: false
-        access-key: ${AMAZON_PAAPI_US_ACCESS_KEY:}
-        secret-key: ${AMAZON_PAAPI_US_SECRET_KEY:}
-        partner-tag: deinshop-20
-
-      UK:
-        enabled: false
-        access-key: ${AMAZON_PAAPI_UK_ACCESS_KEY:}
-        secret-key: ${AMAZON_PAAPI_UK_SECRET_KEY:}
-        partner-tag: deinshop-21
 
 ebay:
   feed:

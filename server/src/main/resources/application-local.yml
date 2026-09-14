@@ -1,0 +1,6 @@
+# Local development uses the legacy RemoteWebDriver scraper.
+# Start with: SPRING_PROFILES_ACTIVE=local
+hwapi:
+  scraping:
+    backend: selenium
+

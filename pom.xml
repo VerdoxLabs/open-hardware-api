@@ -15,11 +15,7 @@
     <description>Service to run the api using spring</description>
     <packaging>pom</packaging>
     <modules>
-        <module>client</module>
         <module>server</module>
-        <module>spring-db</module>
-        <module>price-api</module>
-        <!--        <module>thirdparty/amazon-paapi</module>-->
     </modules>
     <url/>
     <licenses>
@@ -37,26 +33,6 @@
     <properties>
         <java.version>21</java.version>
     </properties>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>de.verdox.open-hardware-api</groupId>
-                <artifactId>client</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>de.verdox.open-hardware-api</groupId>
-                <artifactId>server</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>de.verdox.open-hardware-api</groupId>
-                <artifactId>spring-db</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <dependencies>
         <dependency>

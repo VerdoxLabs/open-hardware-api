@@ -1,3 +1,7 @@
+hwapi:
+  scraping:
+    backend: ${HWAPI_SCRAPER_BACKEND:webscraper}
+
 spring:
   flyway:
     enabled: true

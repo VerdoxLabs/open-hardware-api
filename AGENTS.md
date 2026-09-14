@@ -1,7 +1,7 @@
 # open-hardware-api — AI Agent Encyclopedia
 
 > Module doc. Start at the workspace root [`../AGENTS.md`](../AGENTS.md) for the big picture.
-> Java 21 · Spring Boot 3.5.6 · Maven multi-module · base package `de.verdox.hwapi`.
+> Java 21 · Spring Boot 3.5.6 · single Maven application module · base package `de.verdox.hwapi`.
 
 ## What this service is
 
@@ -11,17 +11,14 @@ PostgreSQL JPA model, **exposes a REST API** (`/api/v1/*`), and **syncs** catalo
 list of downstream "client" nodes (configured in a JSON file). It is the single source of truth
 for *what a part is and what it's worth*.
 
-**Only the `server` module is a runnable application.** The other modules are libraries.
+The `server` module contains the complete runnable application, including persistence,
+domain models, repositories and internal API clients.
 
 ## Module map
 
 | Module | Packaging | Purpose | Runnable? |
 |---|---|---|---|
-| `server/` | Spring Boot fat jar | **The application**: controllers, scraping, price services, scheduling, config, Flyway migrations, resources. Main class `de.verdox.hwapi.OpenHardwareApiApplication`. Depends on `client` + `spring-db`. | **Yes** |
-| `client/` | jar | Thin reactive (WebClient/WebFlux) HTTP **client** for consuming this API from other services. Pure DTO + REST wrappers (`HWApiClient`, `HardwareSpecClient`, `HWApiPricesClient`, `HWApiClusterPricesClient`, `HwApiBenchmarkClient`, `admin/HWApiAdminClient`, `ebay/*`). **Published to Maven and used by `pclagersoftware`.** | No |
-| `spring-db/` | jar | All **JPA entities, Spring Data repositories, enums/value objects, DB utils**. No Spring context — just `@Entity`/`@Repository` classes. | No |
-| `price-api/` | jar | A **parallel / in-progress extraction** of the price domain. Contains a near-duplicate `de.verdox.hwapi.priceapi` package. **Not used by `server`.** Compiles at **Java 25**. | No |
-| `thirdparty/amazon-paapi/` | jar | Wraps the Amazon PA-API 5 SDK (system jar). **Commented out of the parent `<modules>`** — not built by default. | No |
+| `server/` | Spring Boot fat jar | **The complete application**: controllers, scraping, price services, scheduling, config, Flyway migrations, JPA entities, repositories, DTOs and internal HTTP clients. Main class `de.verdox.hwapi.OpenHardwareApiApplication`. | **Yes** |
 
 Parent POM: `pom.xml` (groupId `de.verdox.open-hardware-api`, artifactId `service`). Shared
 (inherited) deps: `spring-boot-starter-web/-webflux/-data-jpa/-validation/-actuator`,
@@ -31,7 +28,7 @@ Parent POM: `pom.xml` (groupId `de.verdox.open-hardware-api`, artifactId `servic
 
 ---
 
-## Domain model (in `spring-db`)
+## Domain model (in `server`)
 
 ### Hardware specs — JOINED inheritance
 Base `model/HardwareSpec.java`: `@Entity @Inheritance(JOINED) @DiscriminatorColumn(spec_type)`.
@@ -46,22 +43,21 @@ and `isCompatibleWith(Motherboard)` via socket. `Fan` (table `fan`) is a case fa
 sellable component: `connectorType` (`FanConnectorType`), embedded `FanSpec` (diameter/rpm/count),
 `airflowCfm`, `staticPressureMmH2o`, `noiseLevelDB`, `mountPositions` (element-collection), `hasRgb`.
 
-Enums/value objects in `model/values/` + `model/`: `HardwareTypes` (big enums: `CpuSocket`,
+Enums/value objects in `catalog/domain/values/` + `catalog/domain/`: `HardwareTypes` (big enums: `CpuSocket`,
 `Chipset`, `RamType`, `PcieVersion`, `CoolerType`, PSU/case/display types, …), `Currency`,
 `ItemCondition`, `DimensionsMm`, `FanSpec`, `M2Slot`, `PcieSlot`, `PowerConnector`, `USBPort`.
 
-Repositories in `component/repository/` (note: package is `de.verdox.hwapi.component.repository`,
-**no** `hardwareapi` segment): `HardwareSpecRepository` (base) + one per type
+Repositories in `catalog/persistence/`: `HardwareSpecRepository` (base) + one per type
 (`CPURepository`, `GPURepository`, `GPUChipRepository`, `MotherboardRepository`, `RAMRepository`,
 `StorageRepository`, `PSURepository`, `PCCaseRepository`, `CPUCoolerRepository`,
 `DisplayRepository`).
 
 ### Product identity / registry
-`productid/ProductIdentity.java` (`product_identity`) → OneToMany `ProductIdentifier`
-(`product_identifier`, unique `(type, identifier)`). `IdentifierType`: `ASIN, EAN, UPC, GTIN,
-MPN, TITLE, TITLE_NORMALIZED`. Service/controller live in `server` (`productidregistry/`).
+`identity/ProductIdentity.java` (`product_identity`) → OneToMany `ProductIdentifier`
+(`product_identifier`, unique `(type, normalized_value)`). `IdentifierType`: `ASIN, EAN, UPC, GTIN,
+MPN, TITLE, TITLE_NORMALIZED`. Service/controller live in `identity/application` and `identity/web`.
 
-### Prices (`priceapi/model/`)
+### Prices (`pricing/model/`)
 - `RemoteActiveListing` (`remote_active_listing`) — a currently-listed item. Unique
   `(market_place_domain, market_place_item_id)`. Fields: uuid (PK), `primaryRegion`
   (`ListingEnums.Country`), marketPlaceName/Domain/ItemID, ean, mpn, title, productManufacturer,
@@ -73,11 +69,11 @@ MPN, TITLE, TITLE_NORMALIZED`. Service/controller live in `server` (`productidre
   (SHA-1) derived from the business key → idempotent upserts.
 - `PriceLookupBlock` (`price_lookup_block`) — rate-limit/blocklist per (ean, currency).
 
-Repositories in `priceapi/repository/`: `RemoteActiveListingRepository`,
+Repositories in `pricing/repository/`: `RemoteActiveListingRepository`,
 `ListingPricePointRepository`, `RemoteSoldItemRepository` (nested projections),
 `PriceLookupBlockRepository`.
 
-### Benchmarks (`benchmarkapi/`)
+### Benchmarks (`benchmark/`)
 `entity/BenchmarkResults.java` (`@Inheritance(JOINED)`, discriminator `benchmark_result_type`):
 `modelName`, `source` (e.g. "passmark"). Subclasses `CPUBenchmarkResults` (cpuMark/threadMark),
 `GPUBenchmarkResults` (g3D/g2D mark). Repositories: `BenchmarkResultRepository` + CPU/GPU.
@@ -111,34 +107,32 @@ Components are cross-linked **logically by EAN/MPN** (no FK between e.g. a sold 
   `GET /search/aggregated?q=`.
 - **Actuator** — `health`, `info` in prod (with k8s probes).
 
-> **Client is ahead of the server.** `client/` references endpoints the current `server` does not
+> **Internal API client is ahead of the server.** `server/.../integration/client/` references endpoints the current `server` does not
 > implement (the whole `/cluster/prices/*` family, `POST /specs/{type}`, `/specs/{type}/bulk|
 > bulkFile|pages`, `GET /prices/sold/series/fetchActive|Completed`, `/prices/sold/avg-current/bulk`).
-> The client is a shared consumer lib used by other Verdox services.
+> These wrappers are used internally for downstream synchronization and are kept in the single server module.
 
 ---
 
 ## Data sources / integrations (in `server`)
 
 - **eBay** (three mechanisms):
-  - *Buy Feed (ITEM) download* — `priceapi/component/service/ebay/EbayFeedPriceService.java`
+  - *Buy Feed (ITEM) download* — `pricing/application/ebay/EbayFeedPriceService.java`
     (uses `com.ebay.api:feed-sdk`). OAuth **Client Credentials** via `EbayOAuthService`
     (in-memory cached token, refresh 60s before expiry); creds from `EbayFeedProperties`
     (`ebay.feed.*` ← `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`). Downloads zipped feed per
     `EbayMarketplace`, unzips, filters by GTIN, parses TSV, upserts active listings + daily price.
   - *Completed/sold listings* — `EbayCompletedListingsService` (`@Scheduled` every 1 min).
-  - *Selenium* — `priceapi/io/ebay/EbayScraper.java`.
-  - Marketplaces/enums in `client/.../ebay/` (`EbayMarketplace`, `EbayDeveloperAPIClient`, …).
-- **Amazon (PA-API 5)** — `AmazonPriceService` body is **currently commented out** (empty
-  `@Service` shell); SDK dep commented in `server/pom.xml`. Config exists
-  (`AmazonPaapiProperties`, `amazon.paapi.marketplaces.*`; DE enabled, partner-tag `verdox-21`).
-  **Do not assume Amazon price fetching works.**
+  - *Selenium* — `pricing/sources/ebay/EbayScraper.java`.
+  - Marketplaces/enums in `server/.../integration/client/ebay/` (`EbayMarketplace`, `EbayDeveloperAPIClient`, …).
+- **Amazon (PA-API 5)** — currently not part of the application. The old commented-out service,
+  SDK helper module and unused configuration were removed during the module consolidation.
 - **Awin (affiliate CSV)** — `AwinFeedService` (download gzip feed → gunzip → parse CSV),
   `AwinProductFeedParser`, `AwinFeedOverviewService`, `AwinTrackActiveListingsService`
   (`@Scheduled(cron="0 0 * * * *")` hourly). Admin: `controllerapi/AwinAdminService`.
-- **Passmark (benchmarks)** — `benchmarkapi/PassmarkDataScraper` (Selenium),
+- **Passmark (benchmarks)** — `benchmark/PassmarkDataScraper` (Selenium),
   `BenchmarkService` (`@Scheduled(fixedRate=7, TimeUnit.DAYS)`), upserts by `(modelName, source)`.
-- **Selenium site scrapers** — framework in `hardwareapi/scraping/`: `api/ComponentWebScraper`
+- **Selenium site scrapers** — framework in `catalog/ingestion/`: `api/ComponentWebScraper`
   (core interface), `api/WebsiteScraper` (fluent DSL), `api/ScrapeParser` (declarative field
   parser, DE/EN number normalization), `api/WebsiteCatalogScraper`, `api/WebsiteScrapingStrategy`
   + per-site strategies, `api/selenium/SeleniumBasedWebScraper` (+ `SeleniumUtil` reads
@@ -147,6 +141,9 @@ Components are cross-linked **logically by EAN/MPN** (no FK between e.g. a sold 
   `pc_builder_io/`, `pc_kombo/`, `dbgpu/`. `pcpartpicker/` exists but is **not registered**.
   Orchestration: `scraping/ScrapingService` (builds scraper list, runs AMD CSV import + each web
   scraper, registers products, pushes specs to `HardwareSyncService`).
+- **Selectable scraping backend** — `hwapi.scraping.backend=selenium|webscraper` keeps the existing
+  Jsoup/site parsers but selects how HTML is rendered. `selenium` uses the legacy RemoteWebDriver;
+  `webscraper` calls the Webscraper API `POST /v1/raw` endpoint with API-key authentication.
 
 ---
 
@@ -195,24 +192,25 @@ core=CPUs/max=2×CPUs queue 200 `CallerRunsPolicy`). `@EnableAsync` on.
 ## Configuration & environment
 
 - **`.env`** (module root): `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` (**trailing `;` on both lines —
-  parsing hazard**), `AMAZON_PAAPI_DE_ACCESS_KEY`, `AMAZON_PAAPI_DE_SECRET_KEY`.
+  parsing hazard**).
 - **`application.yml`** (common): `server.port` `${SERVER_PORT:${PORT:8080}}`, bind `0.0.0.0`,
   json/ndjson compression, `sync.*` (flush-interval 60000, flush-threshold 100, bulk max-batch 200),
-  Hibernate batch tuning, `amazon.paapi.marketplaces.{DE,US,UK}.*`, `ebay.feed.*`
+  Hibernate batch tuning, `ebay.feed.*`
   (client-id/secret from env, category-id default `58058` = PC components, download-dir
   default `/tmp/ebay-feeds`, enabled-marketplaces GERMANY/AUSTRIA/SWITZERLAND/USA/UK overridable
   via `EBAY_FEED_MARKETPLACE_1..5`), logging levels.
 - **Other env vars:** `SELENIUM_REMOTE_URL` (default `http://localhost:4444`; compose sets
-  `http://selenium:4444/wd/hub`), `SPRING_PROFILES_ACTIVE`.
+  `http://selenium:4444/wd/hub`), `HWAPI_SCRAPER_BACKEND` (`selenium` default or `webscraper`),
+  `WEBSCRAPER_API_URL` (default `http://localhost:8090`), `WEBSCRAPER_API_KEY`,
+  `WEBSCRAPER_ENGINE` (`auto` default), `WEBSCRAPER_TIMEOUT`, `SPRING_PROFILES_ACTIVE`.
 
 ---
 
 ## Build & run
 
-- **Build:** `mvn -f open-hardware-api/pom.xml clean package -DskipTests` (or `mvn -pl server -am
-  package` for just the app). The Dockerfile invokes `./mvnw clean package` with **build context =
-  repo root** (note: there is no `mvnw` at the module root; the wrapper is expected at the parent).
-  Java 21 (but `price-api` needs Java 25).
+- **Build:** `mvn -f open-hardware-api/pom.xml clean package -DskipTests` (or `mvn -pl server
+  package`). The Dockerfile invokes `./mvnw clean package` with build context set to the repository
+  root, where the Maven wrapper is checked in. Java 21.
 - **Run:** fat jar from `server/target/*.jar`. Dev: `SPRING_PROFILES_ACTIVE=dev` (H2); scraping
   needs Selenium reachable. Prod: `SPRING_PROFILES_ACTIVE=prod` + Postgres + Selenium env.
 - **Tests:** `mvn test` (h2 runtime; CI skips tests).
@@ -221,22 +219,21 @@ core=CPUs/max=2×CPUs queue 200 `CallerRunsPolicy`). `@EnableAsync` on.
   -DskipTests` → publishes SNAPSHOTs to `https://repo.verdox.de/snapshots`.
 - **Docker:** `Dockerfile` (multi-stage temurin 21 → jre-alpine, non-root uid 1000, volume
   `/var/lib/open-hardware-api`, `SPRING_PROFILES_ACTIVE=prod`, JMX). `docker-compose.yml`:
-  `db` (postgres:16, `pcparts`), `selenium` (standalone-all-browsers, shm 2g), `app`
-  (host `5050`→`8080`, mounts `./open-hardware-api` as data volume).
+  `db` (postgres:16, `pcparts`), `selenium` (legacy fallback), `webscraper-db`,
+  `webscraper-camoufox`, `webscraper-api` (built from sibling `../web-scraper-api`, host
+  `8090`→`8080`), and `app` (host `5050`→`8080`). The app defaults to the Webscraper API;
+  set `HWAPI_SCRAPER_BACKEND=selenium` to select the legacy backend.
 
 ---
 
 ## Gotchas (read before editing)
 
-1. **Duplicate `de.verdox.hwapi.priceapi` package** in both `server/` and `price-api/`. `server`
-   depends only on `client` + `spring-db` (NOT `price-api`), so the **running app uses the
-   `server` copy** — edit `server/.../priceapi/...`. Beware near-duplicate paths
-   (`server/.../priceapi/io/ebay/EbayScraper.java` vs `price-api/.../priceapi/ebay/EbayScraper.java`).
-2. **`price-api` compiles at Java 25**; everything else is 21.
-3. **Amazon is wired in config but disabled in code** (PA-API SDK is a system jar; service body
-   commented out).
-4. **Client is ahead of the server** (see REST note above).
-5. **Lombok everywhere**; mixed slf4j / `java.util.logging` (`ScrapingService.LOGGER` is a shared
+1. **The application is intentionally single-module.** All production Java sources live under
+   `server/src/main/java`; do not recreate `client`, `spring-db` or the old duplicate `price-api`
+   modules without a concrete deployment requirement.
+2. **Amazon price fetching is currently not included.** Runtime price sources are
+   eBay/Awin/Kleinanzeigen only.
+3. **Lombok everywhere**; mixed slf4j / `java.util.logging` (`ScrapingService.LOGGER` is a shared
    `java.util.logging.Logger` used across scraping classes).
 6. **JOINED inheritance + two-repo save pattern:** `HardwareSpecService.saveHardware/...Batch`
    saves to base repo AND type-specific repo, dedupes/merges by EAN/MPN, updates
@@ -247,7 +244,7 @@ core=CPUs/max=2×CPUs queue 200 `CallerRunsPolicy`). `@EnableAsync` on.
    a scraper, and a Flyway migration.
 8. **Deterministic IDs:** `RemoteSoldItem.uuid` is hand-rolled UUIDv5 from its business key →
    idempotent upserts. Don't switch to `@GeneratedValue` without breaking that.
-9. **`DataStorage` path rules** (`spring-db/.../util/DataStorage`): Linux →
+9. **`DataStorage` path rules** (`server/.../infrastructure/storage/DataStorage`): Linux →
    `/var/lib/open-hardware-api/<sub>`, else (Windows) → `./open-hardware-api/<sub>`. This is why a
    nested `open-hardware-api/open-hardware-api/` runtime-data folder exists (scrape cache,
    `synchronization.json`, `ebay_api_config.json`, `awin-feeds/`). **Runtime state is file-based.**
@@ -262,18 +259,17 @@ core=CPUs/max=2×CPUs queue 200 `CallerRunsPolicy`). `@EnableAsync` on.
     without a reachable Grid.
 14. **Comments/logs largely in German**; identifiers English.
 15. **`.env` trailing semicolons** on the EBAY lines.
-16. **`spring-db` repo package is `de.verdox.hwapi.component.repository`** (missing the
-    `hardwareapi` segment) — don't "fix" it without updating all imports.
+16. **Repository package is `de.verdox.hwapi.catalog.persistence`**.
 
 ### Quick file index (module-relative)
 - App: `server/src/main/java/de/verdox/hwapi/OpenHardwareApiApplication.java`
 - Config: `server/.../configuration/{SchedulingConfig,SynchronizationConfig,CorsCfg,ApiExceptionHandler,ApiJacksonConfig}.java`
-- Scraping: `server/.../hardwareapi/scraping/ScrapingService.java`, `scraping/api/**`, `scraping/websites/**`
-- Specs: `server/.../hardwareapi/component/service/{HardwareSpecService,HardwareSyncService,HardwareSpecCache}.java`
-- Benchmarks: `server/.../benchmarkapi/{BenchmarkController,BenchmarkService,PassmarkDataScraper}.java`
-- Prices: `server/.../priceapi/component/controller/APIPricesController.java`, `.../service/**` (ebay/amazon/awin + ItemPriceService + writers)
-- Admin/registry: `server/.../controllerapi/**`, `server/.../productidregistry/**`
-- Entities/repos: `spring-db/.../model/**`, `spring-db/.../priceapi/**`, `spring-db/.../benchmarkapi/**`, `spring-db/.../productid/**`, `spring-db/.../component/repository/**`
-- Client: `client/.../client/**`
-- Migrations: `server/src/main/resources/db/migration/V1__.sql`…`V15__.sql`
+- Scraping: `server/.../catalog/ingestion/ScrapingService.java`, `ingestion/api/**`, `ingestion/websites/**`
+- Specs: `server/.../catalog/application/{HardwareSpecService,HardwareSyncService,HardwareSpecCache}.java`
+- Benchmarks: `server/.../benchmark/{BenchmarkController,BenchmarkService,PassmarkDataScraper}.java`
+- Prices: `server/.../pricing/web/APIPricesController.java`, `.../application/**` (ebay/awin/kleinanzeigen + ItemPriceService + writers)
+- Admin/registry: `server/.../admin/**`, `server/.../identity/**`
+- Entities/repos: `server/.../catalog/domain/**`, `server/.../pricing/**`, `server/.../benchmark/**`, `server/.../identity/**`, `server/.../catalog/persistence/**`
+- Internal API client: `server/.../integration/client/**`
+- Migrations: `server/src/main/resources/db/migration/V1__.sql`…`V18__.sql`
 - Infra: `pom.xml`, `*/pom.xml`, `Dockerfile`, `docker-compose.yml`, `.env`, `.github/workflows/verdox-repo-publish.yml`

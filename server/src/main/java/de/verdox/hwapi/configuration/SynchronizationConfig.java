@@ -2,7 +2,7 @@ package de.verdox.hwapi.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import de.verdox.hwapi.hardwareapi.scraping.ScrapingService;
+import de.verdox.hwapi.catalog.ingestion.ScrapingService;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.Setter;
@@ -21,8 +21,8 @@ import java.util.logging.Level;
 @Slf4j
 @Component
 public class SynchronizationConfig {
-    private static final File FILE = de.verdox.hwapi.util.DataStorage.resolve("synchronization.json").toFile();
-    private static final File TMP = de.verdox.hwapi.util.DataStorage.resolve("synchronization.json.tmp").toFile();
+    private static final File FILE = de.verdox.hwapi.infrastructure.storage.DataStorage.resolve("synchronization.json").toFile();
+    private static final File TMP = de.verdox.hwapi.infrastructure.storage.DataStorage.resolve("synchronization.json.tmp").toFile();
 
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
