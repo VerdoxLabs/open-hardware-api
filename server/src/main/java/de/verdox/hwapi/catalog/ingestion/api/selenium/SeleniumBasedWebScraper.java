@@ -73,6 +73,9 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
      */
     @Setter
     private BiPredicate<String, Document> shouldSavePage;
+    /** Minimum interval between actual network requests for this domain. Cache hits never wait. */
+    @Setter
+    private Duration minLiveRequestInterval = Duration.ZERO;
 
     public SeleniumBasedWebScraper(String id, ScrapingCache cache,
                                    CookieJar cookieJar,
@@ -225,6 +228,8 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             }
             return Document.createShell(url);
         }
+
+        waitForLiveRequestSlot(domain);
 
         // 2) Live-Laden – Headless oder Selenium – mit Fallback
         Document doc;
@@ -520,14 +525,21 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         if (ttl == null || ttl.isZero() || ttl.isNegative()) return true;
         try {
             Path file = fileFor(key);
-            if (!Files.exists(file)) return false;
-            FileTime lastModified = Files.getLastModifiedTime(file);
+            Path cachedFile = Files.exists(file)
+                    ? file
+                    : file.resolveSibling(file.getFileName() + ".gz");
+            if (!Files.exists(cachedFile)) return false;
+            FileTime lastModified = Files.getLastModifiedTime(cachedFile);
             Instant cutoff = Instant.now().minus(ttl);
             return lastModified.toInstant().isAfter(cutoff);
         } catch (Exception e) {
             // Defensive: bei Fehler lieber als „nicht frisch“ behandeln → neu laden
             return false;
         }
+    }
+
+    private void waitForLiveRequestSlot(String domain) {
+        DomainRateLimiter.await(domain, minLiveRequestInterval);
     }
 
     /**

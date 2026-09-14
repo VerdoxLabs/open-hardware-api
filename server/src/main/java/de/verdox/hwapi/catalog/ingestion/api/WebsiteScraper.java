@@ -7,6 +7,7 @@ import lombok.Getter;
 import org.jsoup.nodes.Document;
 
 import java.util.*;
+import java.time.Duration;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -21,6 +22,7 @@ public class WebsiteScraper {
     private final Set<SpecificScrape<?>> scrapes = new LinkedHashSet<>();
     private BiPredicate<String, Document> challengeDetection = null;
     private BiPredicate<String, Document> shouldSave = null;
+    private Duration minLiveRequestInterval = Duration.ZERO;
     private BiConsumer<ComponentWebScraper.ScrapedSpecs, HardwareSpec<?>> baseLogic;
 
     public WebsiteScraper(HardwareSpecService service, String domain) {
@@ -41,6 +43,7 @@ public class WebsiteScraper {
             if (shouldSave != null) {
                 websiteCatalogScraper.getSeleniumBasedWebScraper().setShouldSavePage(shouldSave);
             }
+            websiteCatalogScraper.getSeleniumBasedWebScraper().setMinLiveRequestInterval(minLiveRequestInterval);
         })).toList();
     }
 
@@ -89,6 +92,11 @@ public class WebsiteScraper {
 
     public WebsiteScraper withShouldSavePredicate(BiPredicate<String, Document> shouldSave) {
         this.shouldSave = shouldSave;
+        return this;
+    }
+
+    public WebsiteScraper withMinLiveRequestInterval(Duration interval) {
+        this.minLiveRequestInterval = interval == null ? Duration.ZERO : interval;
         return this;
     }
 
@@ -211,6 +219,10 @@ public class WebsiteScraper {
 
                     @Override
                     public Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable {
+                        if (scrapedSpecs.specs().isEmpty()) {
+                            ScrapingService.LOGGER.log(Level.WARNING, "Skipping empty scrape result for " + domain + " [" + mainEntry.subId + "] " + scrapedSpecs.urls());
+                            return Optional.empty();
+                        }
                         try {
                             HARDWARE hw = extractHardware(scrapedSpecs);
                             mainEntry.scrapeLogic().accept(scrapedSpecs, hw);
@@ -248,6 +260,10 @@ public class WebsiteScraper {
 
                     @Override
                     public Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable {
+                        if (scrapedSpecs.specs().isEmpty()) {
+                            ScrapingService.LOGGER.log(Level.WARNING, "Skipping empty scrape result for " + domain + " [" + entry.subId + "] " + scrapedSpecs.urls());
+                            return Optional.empty();
+                        }
                         try {
                             HARDWARE hw = extractHardware(scrapedSpecs);
                             mainEntry.scrapeLogic().accept(scrapedSpecs, hw);

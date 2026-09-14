@@ -48,4 +48,28 @@ class WebScraperApiClientTest {
         assertThat(apiKey.get()).isEqualTo("secret");
         assertThat(requestBody.get()).contains("https://example.com/part").contains("auto");
     }
+
+    @Test
+    void requestsCatalogRowsThroughTheGenericWaitForSelectorOption() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/v1/raw", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "<html><body>component</body></html>".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        WebScraperApiClient client = new WebScraperApiClient(
+                "http://localhost:" + server.getAddress().getPort(), "secret", "auto",
+                Duration.ofSeconds(5), new ObjectMapper());
+
+        client.fetchHtml("https://pcpartpicker.com/products/cpu/");
+
+        assertThat(requestBody.get())
+                .contains("\"engine\":\"js\"")
+                .contains("\"waitForSelector\":\"#category_content tr.tr__product\"");
+    }
 }

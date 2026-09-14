@@ -31,6 +31,7 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
     @Getter
     @Setter
     private WebsiteScrapingStrategy websiteScrapingStrategy;
+    private CatalogCheckpointStore productCheckpoints;
 
     public WebsiteCatalogScraper(String domain, String id, String... urlsToScrape) {
         this.domain = domain;
@@ -86,7 +87,21 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
         ScrapingService.LOGGER.log(Level.INFO, "\tFound " + singlePages.size() + " scraping pages for " + topLevelHost + " [" + id + "]");
 
-        return singlePages.stream().filter(singlePageCandidate -> !alreadyCollected.contains(singlePageCandidate.urls())).map(singlePageCandidate -> {
+        Duration productRevalidation = websiteScrapingStrategy.productRevalidationInterval();
+        if (productRevalidation != null) {
+            productCheckpoints = new CatalogCheckpointStore(domain, id);
+        }
+        CatalogCheckpointStore checkpoints = productCheckpoints;
+        long dueProducts = singlePages.stream()
+                .filter(candidate -> !alreadyCollected.contains(candidate.urls()))
+                .filter(candidate -> checkpoints == null || checkpoints.isDue(candidate.urls(), productRevalidation))
+                .count();
+        if (checkpoints != null) {
+            ScrapingService.LOGGER.info("\t" + dueProducts + " new or due product pages for " + topLevelHost + " [" + id + "]");
+        }
+
+        return singlePages.stream().filter(singlePageCandidate -> !alreadyCollected.contains(singlePageCandidate.urls()))
+                .filter(singlePageCandidate -> checkpoints == null || checkpoints.isDue(singlePageCandidate.urls(), productRevalidation)).map(singlePageCandidate -> {
             try {
                 Set<Document> documents = new HashSet<>();
                 for (String url : singlePageCandidate.urls()) {
@@ -118,7 +133,10 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
                                         }
                                     })
-                                    .setTtl(Duration.ofDays(30))
+                                    // Product details are immutable enough for our catalog.  Once a
+                                    // page was cached, reparse it locally; only catalog pages decide
+                                    // whether a newly discovered product needs a live request.
+                                    .setTtl(Duration.ZERO)
                     );
                     documents.add(document);
                 }
@@ -142,6 +160,13 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
                 alreadyCollected.addAll(singlePageCandidate.urls());
             }
         }).filter(Objects::nonNull);
+    }
+
+    @Override
+    public void markProcessed(ScrapedSpecPage scrapedPage) {
+        if (productCheckpoints != null) {
+            productCheckpoints.markProcessed(scrapedPage.singlePageCandidate().urls());
+        }
     }
 
     @Override

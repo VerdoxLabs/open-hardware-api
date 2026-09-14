@@ -2,6 +2,7 @@ package de.verdox.hwapi.pricing.application.ebay;
 
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.ingestion.ScrapingService;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import de.verdox.hwapi.pricing.api.PricePointUploadDto;
 import de.verdox.hwapi.catalog.domain.values.Currency;
@@ -85,15 +86,17 @@ public class EbayCompletedListingsService {
     private final EbayScraper ebayBackgroundScraper = new EbayScraper("background_job");
     private final EbayScraper ebayInstant = new EbayScraper("instant_service");
     private final HardwareSpecService hardwareSpecService;
+    private final ScrapingEnabled scrapingEnabled;
     private final Map<String, CompletableFuture<Void>> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
-    public EbayCompletedListingsService(EbayAPITrackActiveListingsService ebayAPITrackActiveListingsService, PriceLookupBlockRepository priceLookupBlockRepository, RemoteSoldItemRepository repo, PricePointSyncService pricePointSyncService, HardwareSpecService hardwareSpecService) {
+    public EbayCompletedListingsService(EbayAPITrackActiveListingsService ebayAPITrackActiveListingsService, PriceLookupBlockRepository priceLookupBlockRepository, RemoteSoldItemRepository repo, PricePointSyncService pricePointSyncService, HardwareSpecService hardwareSpecService, ScrapingEnabled scrapingEnabled) {
         this.ebayAPITrackActiveListingsService = ebayAPITrackActiveListingsService;
         this.priceLookupBlockRepository = priceLookupBlockRepository;
         this.repo = repo;
         this.pricePointSyncService = pricePointSyncService;
         this.hardwareSpecService = hardwareSpecService;
+        this.scrapingEnabled = scrapingEnabled;
     }
 
     // --------------------------
@@ -162,6 +165,7 @@ public class EbayCompletedListingsService {
      * Scrape alle gewünschten eBay-Marktplätze.
      */
     public Set<RemoteSoldItem> fetchDataFromAllEbayMarketPlaces(String EAN, boolean background) {
+        if (!scrapingEnabled.isEnabled()) return Set.of();
         Set<RemoteSoldItem> remoteItems = new HashSet<>();
         EbayScraper ebayScraper = background ? ebayBackgroundScraper : ebayInstant;
 
@@ -185,6 +189,7 @@ public class EbayCompletedListingsService {
 
     @Scheduled(timeUnit = TimeUnit.MINUTES, fixedDelay = 1)
     public void travelQueue() {
+        if (!scrapingEnabled.isEnabled()) return;
         Set<String> setToTravel = currentBuffer.get() ? bufferB : bufferA;
         currentBuffer.set(!currentBuffer.get());
         int count = setToTravel.size();

@@ -2,6 +2,7 @@ package de.verdox.hwapi.pricing.application.awin;
 
 import de.verdox.hwapi.integration.client.admin.HardwareAdminDtos;
 import de.verdox.hwapi.catalog.persistence.HardwareSpecRepository;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.domain.values.Currency;
 import de.verdox.hwapi.pricing.api.AwinProductRecord;
@@ -47,6 +48,7 @@ public class AwinTrackActiveListingsService {
     private final ProductRegistryService productRegistryService;
     private final HardwareSpecService hardwareSpecService;
     private final HardwareSpecRepository hardwareSpecRepository;
+    private final ScrapingEnabled scrapingEnabled;
 
 
     private final AtomicBoolean fetchRunning = new AtomicBoolean(false);
@@ -98,6 +100,7 @@ public class AwinTrackActiveListingsService {
     @Transactional
     @Async
     public void runDailyAwinImport() {
+        if (!scrapingEnabled.isEnabled()) return;
         rebuildMpnIndex();
         updateFromAwinFeed();
     }
@@ -105,6 +108,10 @@ public class AwinTrackActiveListingsService {
     @Transactional
     @PostConstruct
     public void init() {
+        if (!scrapingEnabled.isEnabled()) {
+            LOGGER.info("Awin import is disabled by HWAPI_SCRAPING_ENABLED.");
+            return;
+        }
         CompletableFuture.runAsync(() -> {
             rebuildMpnIndex();
             updateFromAwinFeed();

@@ -1,6 +1,7 @@
 package de.verdox.hwapi.pricing.application.kleinanzeigen;
 
 import de.verdox.hwapi.catalog.domain.values.Currency;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.pricing.application.RemoteActiveListingWriterService;
 import de.verdox.hwapi.pricing.sources.kleinanzeigen.KleinanzeigenAd;
 import de.verdox.hwapi.pricing.sources.kleinanzeigen.KleinanzeigenScraper;
@@ -67,6 +68,7 @@ public class KleinanzeigenPriceService {
     private final ProductRegistryService productRegistryService;
     private final RemoteActiveListingWriterService listingWriter;
     private final C2cMatchReviewRepository reviewRepository;
+    private final ScrapingEnabled scrapingEnabled;
 
     private volatile KleinanzeigenScraper scraper;
 
@@ -93,6 +95,7 @@ public class KleinanzeigenPriceService {
     @Scheduled(cron = "0 20 * * * *", zone = "Europe/Berlin")
     @Async
     public void runScheduledScrape() {
+        if (!scrapingEnabled.isEnabled()) return;
         LOGGER.log(Level.INFO, "Kleinanzeigen-Scrape gestartet");
         int total = 0;
         for (String query : QUERIES) {

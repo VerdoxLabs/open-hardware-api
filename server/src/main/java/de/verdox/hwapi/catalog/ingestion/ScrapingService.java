@@ -2,11 +2,14 @@ package de.verdox.hwapi.catalog.ingestion;
 
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.application.HardwareSyncService;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.catalog.ingestion.api.ComponentWebScraper;
 import de.verdox.hwapi.catalog.ingestion.websites.amd.AmdCpuCsvImporter;
 import de.verdox.hwapi.catalog.ingestion.websites.intel.IntelScraper;
 import de.verdox.hwapi.catalog.ingestion.websites.pc_builder_io.PCBuilderIOScrapers;
 import de.verdox.hwapi.catalog.ingestion.websites.pc_kombo.PCKomboScrapers;
+import de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker.PCPartPickerCpuScraper;
+import de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker.PCPartPickerScrapers;
 import de.verdox.hwapi.catalog.domain.CPU;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import de.verdox.hwapi.identity.ProductIdentifier;
@@ -81,6 +84,7 @@ public class ScrapingService {
     private final HardwareSyncService hardwareSyncService;
     private final ProductRegistryService productRegistryService;
     private final TaskExecutor jobExecutor;
+    private final ScrapingEnabled scrapingEnabled;
 
     private CompletableFuture<Void> currentlyRunning;
 
@@ -100,12 +104,14 @@ public class ScrapingService {
             HardwareSpecService hardwareSpecService,
             HardwareSyncService hardwareSyncService,
             ProductRegistryService productRegistryService,
-            @Qualifier("jobExecutor") TaskExecutor jobExecutor
+            @Qualifier("jobExecutor") TaskExecutor jobExecutor,
+            ScrapingEnabled scrapingEnabled
     ) {
         this.hardwareSpecService = hardwareSpecService;
         this.hardwareSyncService = hardwareSyncService;
         this.productRegistryService = productRegistryService;
         this.jobExecutor = jobExecutor;
+        this.scrapingEnabled = scrapingEnabled;
 
         addListener(hardwareSpecService);
         this.scrapers = setupScrapers();
@@ -118,16 +124,23 @@ public class ScrapingService {
         list.addAll(IntelScraper.create(hardwareSpecService).buildScrapers());
         list.addAll(PCBuilderIOScrapers.create(hardwareSpecService).buildScrapers());
         list.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
+        list.addAll(PCPartPickerCpuScraper.create(hardwareSpecService).buildScrapers());
+        list.addAll(PCPartPickerScrapers.create(hardwareSpecService).buildScrapers());
         return list;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void startScrapingOnStart() {
+        if (!scrapingEnabled.isEnabled()) {
+            LOGGER.info("Catalog scraping is disabled by HWAPI_SCRAPING_ENABLED.");
+            return;
+        }
         executeJob(1);
     }
 
     @Scheduled(cron = "0 0 2 * * *", zone = "Europe/Berlin")
     public void runDailyJob() {
+        if (!scrapingEnabled.isEnabled()) return;
         executeJob(1);
     }
 
@@ -145,6 +158,9 @@ public class ScrapingService {
      * ------------------------------------------------------------ */
 
     public synchronized CompletableFuture<Void> startScraping() {
+        if (!scrapingEnabled.isEnabled()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Catalog scraping is disabled."));
+        }
         if (isRunning()) {
             return currentlyRunning;
         }
@@ -216,6 +232,10 @@ public class ScrapingService {
         CompletableFuture.allOf(scraperTasks.toArray(CompletableFuture[]::new)).join();
     }
 
+    public boolean isEnabled() {
+        return scrapingEnabled.isEnabled();
+    }
+
     private void scrapeOne(ComponentWebScraper<? extends HardwareSpec> scraper) {
         int weight = Math.max(1, scraper.getAmountTasks());
         ScraperProgress progress = scraperProgress.get(scraper.id());
@@ -233,9 +253,11 @@ public class ScrapingService {
                             var map = scraper.extract(page);
                             if (map == null) return null;
                             var result = scraper.parse(map, this::callScrapeEvent);
-                            result.ifPresent(hardwareSpec -> setStatus(
-                                    "Scraper: " + hardwareSpec.getMpnsSorted().getFirst()
-                                            + " / " + scraper.id() + " [" + counter.getAndIncrement() + "]"));
+                            result.ifPresent(hardwareSpec -> {
+                                scraper.markProcessed(page);
+                                setStatus("Scraper: " + hardwareSpec.getMpnsSorted().getFirst()
+                                        + " / " + scraper.id() + " [" + counter.getAndIncrement() + "]");
+                            });
                             return result.orElse(null);
                         } catch (Throwable t) {
                             progressError(scraper, t);

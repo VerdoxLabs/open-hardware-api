@@ -236,14 +236,14 @@ function Activity({t, d, i}: { t: string; d: string; i: string }) {
 }
 
 function Database() {
-    const [q, setQ] = useState(""), [type, setType] = useState(""), [manufacturer, setManufacturer] = useState(""), [identifier, setIdentifier] = useState(""), [withImage, setWithImage] = useState(false), [sort, setSort] = useState("name"), [types, setTypes] = useState<string[]>([]), [rows, setRows] = useState<Hardware[]>([]), [page, setPage] = useState(0), [totalPages, setTotalPages] = useState(0), [totalElements, setTotalElements] = useState(0), [loading, setLoading] = useState(false), [searched, setSearched] = useState(false), [selected, setSelected] = useState<Hardware>();
+    const [q, setQ] = useState(""), [type, setType] = useState(""), [manufacturer, setManufacturer] = useState(""), [identifier, setIdentifier] = useState(""), [sort, setSort] = useState("name"), [types, setTypes] = useState<string[]>([]), [rows, setRows] = useState<Hardware[]>([]), [page, setPage] = useState(0), [totalPages, setTotalPages] = useState(0), [totalElements, setTotalElements] = useState(0), [loading, setLoading] = useState(false), [searched, setSearched] = useState(false), [selected, setSelected] = useState<Hardware>(), [backupMessage, setBackupMessage] = useState(""), [importing, setImporting] = useState(false);
     useEffect(() => {
         api<string[]>("/api/v1/specs/types").then(setTypes).catch(() => undefined)
     }, []);
     const search = async (targetPage = 0) => {
         setLoading(true);
         try {
-            const params = new URLSearchParams({q, manufacturer, identifier, withImage: String(withImage), page: String(targetPage), size: "25", sort});
+            const params = new URLSearchParams({q, manufacturer, identifier, page: String(targetPage), size: "25", sort});
             if (type) params.set("type", type);
             const result = await api<SearchPage>(`/api/v1/specs/search/page?${params}`);
             setRows(result.content);
@@ -255,7 +255,25 @@ function Database() {
             setLoading(false)
         }
     };
-    const display = (r: Hardware) => String(r.displayName || r.name || r.modelName || r.title || r.id || "Unbenannt");
+    const display = (r: Hardware) => String(r.model || r.name || r.modelName || r.displayName || r.title || r.id || "Unbenannt");
+    const importBackup = async (file?: File) => {
+        if (!file) return;
+        setImporting(true);
+        setBackupMessage("");
+        try {
+            const body = new FormData();
+            body.append("file", file);
+            const response = await fetch("/api/v1/admin/backups/hardware/import", {method: "POST", body});
+            const result = await response.json();
+            if (!response.ok) throw Error(result.detail || "Import fehlgeschlagen.");
+            setBackupMessage(`${result.importedEntities} Hardware-Entities importiert. Vorhandene Einträge wurden zusammengeführt.`);
+            void search();
+        } catch (err) {
+            setBackupMessage(err instanceof Error ? err.message : "Import fehlgeschlagen.");
+        } finally {
+            setImporting(false);
+        }
+    };
     const picture = (r: Hardware) => {
         const urls = Array.isArray(r.pictureUrls) ? r.pictureUrls : [];
         const url = String(r.displayPictureUrl || urls.find(x => !String(x).includes("noimage")) || "");
@@ -270,14 +288,15 @@ function Database() {
         <div className="page-intro">
             <div><span className="kicker">CATALOG EXPLORER</span><h2>Hardware-Datenbank</h2><p>Durchsuche Komponenten,
                 Identifier, Preise und Benchmarks.</p></div>
-            <span className="count-pill">{searched ? `${num(totalElements)} Treffer` : "Bereit zur Suche"}</span></div>
+            <div className="backup-actions"><a className="backup-button" href="/api/v1/admin/backups/hardware">↓ Backup exportieren</a><label className="backup-button import">↑ {importing ? "Import läuft …" : "Backup importieren"}<input type="file" accept="application/zip,.zip" disabled={importing} onChange={e => { void importBackup(e.target.files?.[0]); e.currentTarget.value = ""; }}/></label><span className="count-pill">{searched ? `${num(totalElements)} Treffer` : "Bereit zur Suche"}</span></div></div>
+        {backupMessage && <div className={backupMessage.includes("importiert") ? "alert inline-alert" : "alert danger inline-alert"}>{backupMessage}</div>}
         <div className="search-box"><span>⌕</span><input value={q} onChange={e => setQ(e.target.value)}
                                                          onKeyDown={e => e.key === "Enter" && search()}
                                                          placeholder="Suche nach Modell, MPN oder EAN …"/><input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="Hersteller …"/><input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="MPN / EAN …"/><select
             value={type} onChange={e => setType(e.target.value)}>
             <option value="">Alle Typen</option>
             {types.map(x => <option key={x}>{x}</option>)}</select>
-            <select value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name A–Z</option><option value="id">Neueste ID</option></select><label style={{display: "flex", alignItems: "center", gap: 5, color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap"}}><input type="checkbox" checked={withImage} onChange={e => setWithImage(e.target.checked)}/> Mit Bild</label><button onClick={() => search()} disabled={loading}>{loading ? "Suche …" : "Suchen"}</button>
+            <select value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name A–Z</option><option value="id">Neueste ID</option></select><button onClick={() => search()} disabled={loading}>{loading ? "Suche …" : "Suchen"}</button>
         </div>
         {!searched ? <div className="empty">
             <div className="empty-icon">⌕</div>
@@ -293,9 +312,11 @@ function Database() {
                 </thead>
                 <tbody>{rows.map((r, i) => <tr key={String(r.id ?? i)}>
                     <td>
-                        <div style={{display: "flex", alignItems: "center", gap: 10}}>
-                            {picture(r) ? <img src={picture(r)} alt="" width={42} height={42} style={{objectFit: "contain", borderRadius: 6, background: "#f5f7fa"}}/> : <span style={{width: 42, height: 42, borderRadius: 6, background: "#f1f4f8", display: "inline-grid", placeItems: "center", color: "#9aa7b8"}}>—</span>}
-                            <span><strong>{display(r)}</strong><small>{String(r.manufacturer || "Hersteller nicht angegeben")}</small></span>
+                        <div className="hardware-cell">
+                            <div className="hardware-thumbnail">
+                                {picture(r) ? <img src={picture(r)} alt={display(r)}/> : <span aria-label="Kein Produktbild verfügbar">◈</span>}
+                            </div>
+                            <div className="hardware-name"><strong>{display(r)}</strong><small>{String(r.manufacturer || "Hersteller nicht angegeben")}</small></div>
                         </div>
                     </td>
                     <td><span className="type-tag">{String(r.specType || "—")}</span></td>

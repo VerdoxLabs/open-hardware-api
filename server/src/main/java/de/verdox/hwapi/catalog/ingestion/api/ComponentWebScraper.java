@@ -36,6 +36,11 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
     //TODO: Step 3
     Optional<HARDWARE> parse(ScrapedSpecs scrapedSpecs, ScrapeListener<HARDWARE> onScrape) throws Throwable;
 
+    /** Called after a page produced a usable hardware object. */
+    default void markProcessed(ScrapedSpecPage scrapedPage) {
+        // Most scrapers deliberately do not need a persistent product index.
+    }
+
     int getAmountTasks();
 
     interface ScrapeListener<HARDWARE extends HardwareSpec> {

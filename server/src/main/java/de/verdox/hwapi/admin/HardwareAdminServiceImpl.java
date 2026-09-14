@@ -59,6 +59,9 @@ public class HardwareAdminServiceImpl implements HardwareAdminService {
 
     @Override
     public HardwareAdminDtos.ActionResult restartScraping() {
+        if (!scrapingService.isEnabled()) {
+            return new HardwareAdminDtos.ActionResult(false, "Scraping is disabled by HWAPI_SCRAPING_ENABLED.");
+        }
         if(currentlyDeleting.get()) {
             return new HardwareAdminDtos.ActionResult(false, "Deleting all hardware data currently. Cannot start scraping now.");
         }

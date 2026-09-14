@@ -38,6 +38,14 @@ public interface WebsiteScrapingStrategy {
         return Duration.ofDays(5);
     }
 
+    /**
+     * Reprocesses a known product only after this interval. A null value keeps the
+     * historical behaviour of processing every discovered product in every run.
+     */
+    default Duration productRevalidationInterval() {
+        return null;
+    }
+
     record SinglePageCandidate(Set<String> urls, Map<String, List<String>> specMap) {
         public SinglePageCandidate(String url) {
             this(url, new HashMap<>());

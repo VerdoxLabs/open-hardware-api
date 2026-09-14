@@ -3,36 +3,73 @@ package de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker;
 import de.verdox.hwapi.catalog.ingestion.api.WebsiteScrapingStrategy;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.openqa.selenium.JavascriptExecutor;
 
+import java.time.Duration;
 import java.util.*;
 
 public class PCPartPickerStrategy implements WebsiteScrapingStrategy {
     @Override
+    public Duration cacheTTLForMultiPages() {
+        // Catalog pages are the sole live change detector. Product detail pages remain
+        // permanently cache-first (configured by WebsiteCatalogScraper).
+        return Duration.ofDays(1);
+    }
+
+    @Override
+    public Duration productRevalidationInterval() {
+        // Catalog pages find new URLs daily; known detail pages need only occasional parsing.
+        return Duration.ofDays(30);
+    }
+
+    @Override
     public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
-        if (currentURL.contains("#pages")) {
-            return;
-        }
-
-        var pagination = page.selectFirst("ul.pagination.list-unstyled.xs-text-center");
-        if (pagination == null) return;
-        var lastItemInPagination = pagination.select("li").getLast();
-        int lastPage = Integer.parseInt(lastItemInPagination.text());
-
-        for (int i = 1; i <= lastPage; i++) {
-            multiPageURLs.offer(new MultiPageCandidate(currentURL + "#pages=" + i));
+        // PCPartPicker uses hash routing (#page=N).  Do not infer the last page from
+        // text: the pagination can contain ellipses and its visible range changes.
+        // The hrefs are the authoritative list of pages available from this snapshot.
+        for (Element link : page.select("#module-pagination ul.pagination a[href*='#page=']")) {
+            String pageUrl = link.absUrl("href");
+            if (pageUrl.isBlank()) {
+                pageUrl = link.attr("href");
+            }
+            if (!pageUrl.isBlank()) {
+                multiPageURLs.offer(new MultiPageCandidate(pageUrl));
+            }
         }
     }
 
     @Override
     public void extractSinglePagesURLs(String currentUrl, Document page, Set<SinglePageCandidate> singlePageURLs) {
-        var content = page.selectFirst("productList--detailed.xs-col-12.tablesorter.tablesorter-default");
+        var content = page.selectFirst("table.productList--detailed");
         if (content == null) return;
-        for (Element tr : content.selectFirst("tbody").select("tr")) {
+        var body = content.selectFirst("tbody");
+        if (body == null) return;
+        for (Element tr : body.select("> tr")) {
             var td = tr.selectFirst("td.td__name");
-            String urlToSinglePage = "https://pcpartpicker.com/" + td.selectFirst("a").attr("href");
-            String nameOfHardware = td.selectFirst("div.td__nameWrapper").selectFirst("p").text();
-            singlePageURLs.add(new SinglePageCandidate(urlToSinglePage, Map.of("model", List.of(nameOfHardware))));
+            if (td == null) continue;
+
+            Element productLink = td.selectFirst("a[href*='/product/']");
+            if (productLink == null) continue;
+
+            String urlToSinglePage = productLink.absUrl("href");
+            if (urlToSinglePage.isBlank()) {
+                urlToSinglePage = productLink.attr("href");
+            }
+            Element name = td.selectFirst("div.td__nameWrapper > p");
+            if (name == null || name.text().isBlank() || urlToSinglePage.isBlank()) continue;
+
+            singlePageURLs.add(new SinglePageCandidate(urlToSinglePage,
+                    Map.of("model", List.of(cleanText(name.text())))));
         }
+    }
+
+    @Override
+    public void interactForMultiPage(String currentURL, org.openqa.selenium.WebDriver driver) {
+        int fragmentStart = currentURL.indexOf("#page=");
+        if (fragmentStart < 0 || !(driver instanceof JavascriptExecutor javascript)) return;
+
+        String fragment = currentURL.substring(fragmentStart);
+        javascript.executeScript("window.location.hash = arguments[0];", fragment);
     }
 
     @Override
@@ -95,7 +132,22 @@ public class PCPartPickerStrategy implements WebsiteScrapingStrategy {
             }
         }
 
+        // The ingestion API uses these normalized keys.  Keep the original page labels
+        // as well, as they are useful for component-specific parsers.
+        copyIfPresent(specMap, "Part #", "MPN");
+
+        Element image = document.selectFirst("meta[property=og:image][content]");
+        if (image != null && !image.attr("content").isBlank()) {
+            specMap.put("imageUrl", List.of(image.attr("content").replaceFirst("^http:", "https:")));
+        }
+
         return specMap;
+    }
+
+    private static void copyIfPresent(Map<String, List<String>> specs, String source, String target) {
+        if (!specs.containsKey(target) && specs.containsKey(source)) {
+            specs.put(target, List.copyOf(specs.get(source)));
+        }
     }
 
     /**

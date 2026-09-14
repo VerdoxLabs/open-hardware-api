@@ -10,7 +10,13 @@ import java.util.*;
 public class PCKomboStrategy implements WebsiteScrapingStrategy {
     @Override
     public void extractMultiPageURLs(String currentURL, Document page, Queue<MultiPageCandidate> multiPageURLs) {
-        //TODO
+        for (Element link : page.select(".pagination a[href], a[rel=next][href]")) {
+            String href = link.absUrl("href");
+            if (href.isBlank()) href = link.attr("href");
+            if (!href.isBlank() && !href.equals(currentURL)) {
+                multiPageURLs.offer(new MultiPageCandidate(href));
+            }
+        }
     }
 
     @Override

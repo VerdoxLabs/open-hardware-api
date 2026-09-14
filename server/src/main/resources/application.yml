@@ -30,6 +30,9 @@ sync:
 
 hwapi:
   scraping:
+    # Set HWAPI_SCRAPING_ENABLED=false on a production server that receives
+    # catalog/price imports from a separate local collector.
+    enabled: ${HWAPI_SCRAPING_ENABLED:true}
     # selenium = legacy RemoteWebDriver, webscraper = the new Webscraper API
     backend: ${HWAPI_SCRAPER_BACKEND:selenium}
     webscraper:
@@ -75,6 +78,10 @@ ebay:
       - ${EBAY_FEED_MARKETPLACE_4:USA}
       - ${EBAY_FEED_MARKETPLACE_5:UK}
 spring:
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
   jpa:
     open-in-view: false
   datasource:

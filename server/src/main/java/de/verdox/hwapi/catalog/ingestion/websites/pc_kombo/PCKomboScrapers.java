@@ -34,7 +34,8 @@ public class PCKomboScrapers {
                 .withDisplayScrape(
                         disp -> disp.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();
-                            target.setManufacturer(specs.get("Producer").getFirst());
+                            String producer = extractFirstString("Producer", specs);
+                            if (!producer.isBlank()) target.setManufacturer(producer);
                             String[] resolutions = extractFirstString("Resolution", specs).split("x");
                             target.setRefreshRate((int) parseFirstInt("Refresh Rate", specs));
                             target.setDisplayPanel(extractFirstEnum(HardwareTypes.DisplayPanel.class, "Panel", specs, (s, p) -> p.getName().equalsIgnoreCase(s)));
@@ -125,7 +126,8 @@ public class PCKomboScrapers {
 
                 .withPCCaseScraper(cs -> cs.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();
-                            target.setManufacturer(specs.get("Producer").getFirst());
+                            String producer = extractFirstString("Producer", specs);
+                            if (!producer.isBlank()) target.setManufacturer(producer);
                             target.setDimensions(new DimensionsMm());
                             target.getDimensions().setWidth(parseFirstDouble("Width", specs));
                             target.getDimensions().setDepth(parseFirstDouble("Depth", specs));
@@ -178,14 +180,16 @@ public class PCKomboScrapers {
                             var specs = scraped.specs();
                             int sticks = Math.toIntExact(parseFirstInt("Sticks", specs));
                             target.setType(extractDdrType(extractFirstString("Ram Type", specs)));
-                            target.setSizeGb(Math.toIntExact(parseFirstInt("Size", specs) / sticks));
+                            if (sticks > 0) {
+                                target.setSizeGb(Math.toIntExact(parseFirstInt("Size", specs) / sticks));
+                                target.setSticks(sticks);
+                            }
                             target.setSpeedMtps(Math.toIntExact(parseFirstInt("Clock", specs)));
                             int[] timings = parseTimings(extractFirstString("Timings", specs));
                             target.setCasLatency(timings[0]);
                             target.setRowAddressToColumnAddressDelay(timings[1]);
                             target.setRowPrechargeTime(timings[2]);
                             target.setRowActiveTime(timings[3]);
-                            target.setSticks(sticks);
                         },
                         "https://www.pc-kombo.com/us/components/rams"))
 

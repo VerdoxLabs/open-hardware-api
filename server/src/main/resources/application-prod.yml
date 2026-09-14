@@ -1,4 +1,7 @@
 hwapi:
+  cors:
+    # Comma-separated allow-list. Override with HWAPI_CORS_ALLOWED_ORIGINS per deployment.
+    allowed-origins: ${HWAPI_CORS_ALLOWED_ORIGINS:https://pc-flipping.com,https://www.pc-flipping.com}
   scraping:
     backend: ${HWAPI_SCRAPER_BACKEND:webscraper}
 

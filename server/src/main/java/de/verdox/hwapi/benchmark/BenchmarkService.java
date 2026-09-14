@@ -7,6 +7,7 @@ import de.verdox.hwapi.benchmark.repository.BenchmarkResultRepository;
 import de.verdox.hwapi.benchmark.repository.CPUBenchmarkRepository;
 import de.verdox.hwapi.benchmark.repository.GPUBenchmarkRepository;
 import de.verdox.hwapi.catalog.ingestion.api.selenium.SeleniumBasedWebScraper;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.benchmark.support.QueryUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,10 +29,12 @@ public class BenchmarkService {
     private final PassmarkDataScraper passmarkDataScraper = new PassmarkDataScraper();
     private final CPUBenchmarkRepository cpuBenchmarkRepository;
     private final GPUBenchmarkRepository gpuBenchmarkRepository;
+    private final ScrapingEnabled scrapingEnabled;
 
     @Scheduled(fixedRate = 7, timeUnit = TimeUnit.DAYS)
     @Transactional
     public void updateDatabase() {
+        if (!scrapingEnabled.isEnabled()) return;
         LOGGER.info("Updating benchmark database");
         try {
             fetchFromPassmark();

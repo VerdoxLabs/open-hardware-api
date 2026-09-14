@@ -33,9 +33,15 @@ public final class WebScraperApiClient {
 
     public String fetchHtml(String url) {
         try {
+            boolean pcPartPickerCatalog = isPcPartPickerCatalog(url);
             ObjectNode body = objectMapper.createObjectNode()
                     .put("url", url)
-                    .put("engine", engine);
+                    // PCPartPicker's catalog rows are populated after the initial
+                    // document response; a static/auto shell has an empty tbody.
+                    .put("engine", pcPartPickerCatalog ? "js" : engine);
+            if (pcPartPickerCatalog) {
+                body.put("waitForSelector", "#category_content tr.tr__product");
+            }
             HttpRequest.Builder request = HttpRequest.newBuilder(rawEndpoint)
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
@@ -67,6 +73,16 @@ public final class WebScraperApiClient {
             throw e;
         } catch (Exception e) {
             throw new WebScraperApiException("Could not fetch " + url + " via Webscraper API", e);
+        }
+    }
+
+    private static boolean isPcPartPickerCatalog(String url) {
+        try {
+            URI uri = URI.create(url);
+            return uri.getHost() != null && uri.getHost().endsWith("pcpartpicker.com")
+                    && uri.getPath().startsWith("/products/");
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 

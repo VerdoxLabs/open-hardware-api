@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiPredicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static de.verdox.hwapi.catalog.ingestion.api.ComponentWebScraper.*;
 import static de.verdox.hwapi.catalog.ingestion.websites.pc_kombo.PCKomboScrapers.parseTimings;
@@ -178,16 +180,19 @@ public class PCBuilderIOScrapers {
                         .addMainScrapeLogic((scraped, target) -> {
                                     var specs = scraped.specs();
 
-                                    String[] sticksAndGBPerStick = extractFirstString("modules", specs).split("x");
+                                    Matcher modules = Pattern.compile("(?i)\\s*(\\d+)\\s*x\\s*(\\d+)\\s*GB").matcher(extractFirstString("modules", specs));
+                                    if (modules.find()) {
+                                        target.setSticks(Integer.parseInt(modules.group(1)));
+                                        target.setSizeGb(Integer.parseInt(modules.group(2)));
+                                    }
 
-                                    target.setSticks(Integer.parseInt(sticksAndGBPerStick[0].trim()));
-                                    target.setSizeGb(Integer.parseInt(sticksAndGBPerStick[1].replace("GB", "").trim()));
+                                    Matcher speed = Pattern.compile("(?i)(DDR[2-5])\\s*-?\\s*(\\d+)").matcher(extractFirstString("speed", specs));
+                                    if (speed.find()) {
+                                        target.setType(HardwareTypes.RamType.valueOf(speed.group(1).toUpperCase()));
+                                        target.setSpeedMtps(Integer.parseInt(speed.group(2)));
+                                    }
 
-                                    String[] typeAndSpeed = extractFirstString("speed", specs).split("-");
-
-                                    target.setType(extractFirstEnum(HardwareTypes.RamType.class, "form factor", specs, (s, v) -> s.contains(v.name())));
                                     target.setFormFactor(extractFirstEnum(HardwareTypes.RamFormFactor.class, "form factor", specs, (s, v) -> s.contains(v.name())));
-                                    target.setSpeedMtps(Integer.parseInt(typeAndSpeed[1].trim()));
 
                                     int[] timings = parseTimings(extractFirstString("timing", specs));
                                     target.setCasLatency(timings[0]);

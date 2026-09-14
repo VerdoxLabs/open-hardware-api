@@ -5,7 +5,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -13,10 +19,12 @@ public class HardwareAPIAdminController {
 
     private final HardwareAdminService adminService;
     private final AwinAdminService awinAdminService;
+    private final HardwareBackupService backupService;
 
-    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService) {
+    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService, HardwareBackupService backupService) {
         this.adminService = adminService;
         this.awinAdminService = awinAdminService;
+        this.backupService = backupService;
     }
 
     /**
@@ -60,6 +68,18 @@ public class HardwareAPIAdminController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
         }
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping(value = "/backups/hardware", produces = "application/zip")
+    public void exportHardwareBackup(HttpServletResponse response) throws IOException {
+        response.setContentType("application/zip");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=hardware-catalog-backup.zip");
+        backupService.exportTo(response.getOutputStream());
+    }
+
+    @PostMapping(value = "/backups/hardware/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public HardwareBackupService.ImportResult importHardwareBackup(@RequestParam("file") MultipartFile file) throws IOException {
+        return backupService.importBackup(file);
     }
 
     @GetMapping("/awin/status")
