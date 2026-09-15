@@ -135,6 +135,8 @@ public class PCPartPickerStrategy implements WebsiteScrapingStrategy {
         // The ingestion API uses these normalized keys.  Keep the original page labels
         // as well, as they are useful for component-specific parsers.
         copyIfPresent(specMap, "Part #", "MPN");
+        copyIfPresent(specMap, "Manufacturer", "manufacturer");
+        copyIfPresent(specMap, "Model", "model");
 
         Element image = document.selectFirst("meta[property=og:image][content]");
         if (image != null && !image.attr("content").isBlank()) {

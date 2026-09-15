@@ -1,0 +1,27 @@
+-- Each former generic category now has its own concrete entity/table.
+CREATE TABLE headphones (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE headphones_specifications (spec_id BIGINT NOT NULL REFERENCES headphones(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE keyboard (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE keyboard_specifications (spec_id BIGINT NOT NULL REFERENCES keyboard(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE mouse (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE mouse_specifications (spec_id BIGINT NOT NULL REFERENCES mouse(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE speakers (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE speakers_specifications (spec_id BIGINT NOT NULL REFERENCES speakers(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE webcam (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE webcam_specifications (spec_id BIGINT NOT NULL REFERENCES webcam(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE sound_card (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE sound_card_specifications (spec_id BIGINT NOT NULL REFERENCES sound_card(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE wired_network_card (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE wired_network_card_specifications (spec_id BIGINT NOT NULL REFERENCES wired_network_card(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE wireless_network_card (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE wireless_network_card_specifications (spec_id BIGINT NOT NULL REFERENCES wireless_network_card(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE fan_controller (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE fan_controller_specifications (spec_id BIGINT NOT NULL REFERENCES fan_controller(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE thermal_compound (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE thermal_compound_specifications (spec_id BIGINT NOT NULL REFERENCES thermal_compound(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE external_hard_drive (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE external_hard_drive_specifications (spec_id BIGINT NOT NULL REFERENCES external_hard_drive(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE optical_drive (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE optical_drive_specifications (spec_id BIGINT NOT NULL REFERENCES optical_drive(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));
+CREATE TABLE operating_system (id BIGINT PRIMARY KEY REFERENCES hardware_spec(id));
+CREATE TABLE operating_system_specifications (spec_id BIGINT NOT NULL REFERENCES operating_system(id) ON DELETE CASCADE, specifications_key VARCHAR(255) NOT NULL, specifications VARCHAR(4000), PRIMARY KEY (spec_id, specifications_key));

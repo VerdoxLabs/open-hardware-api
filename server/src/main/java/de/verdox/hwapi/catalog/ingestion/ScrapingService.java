@@ -124,8 +124,8 @@ public class ScrapingService {
         list.addAll(IntelScraper.create(hardwareSpecService).buildScrapers());
         list.addAll(PCBuilderIOScrapers.create(hardwareSpecService).buildScrapers());
         list.addAll(PCKomboScrapers.create(hardwareSpecService).buildScrapers());
-        list.addAll(PCPartPickerCpuScraper.create(hardwareSpecService).buildScrapers());
         list.addAll(PCPartPickerScrapers.create(hardwareSpecService).buildScrapers());
+        list.addAll(PCPartPickerCpuScraper.create(hardwareSpecService).buildScrapers());
         return list;
     }
 

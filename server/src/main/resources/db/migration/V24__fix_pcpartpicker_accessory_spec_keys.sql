@@ -1,0 +1,13 @@
+ALTER TABLE headphones_specifications RENAME COLUMN spec_id TO headphones_id;
+ALTER TABLE keyboard_specifications RENAME COLUMN spec_id TO keyboard_id;
+ALTER TABLE mouse_specifications RENAME COLUMN spec_id TO mouse_id;
+ALTER TABLE speakers_specifications RENAME COLUMN spec_id TO speakers_id;
+ALTER TABLE webcam_specifications RENAME COLUMN spec_id TO webcam_id;
+ALTER TABLE sound_card_specifications RENAME COLUMN spec_id TO sound_card_id;
+ALTER TABLE wired_network_card_specifications RENAME COLUMN spec_id TO wired_network_card_id;
+ALTER TABLE wireless_network_card_specifications RENAME COLUMN spec_id TO wireless_network_card_id;
+ALTER TABLE fan_controller_specifications RENAME COLUMN spec_id TO fan_controller_id;
+ALTER TABLE thermal_compound_specifications RENAME COLUMN spec_id TO thermal_compound_id;
+ALTER TABLE external_hard_drive_specifications RENAME COLUMN spec_id TO external_hard_drive_id;
+ALTER TABLE optical_drive_specifications RENAME COLUMN spec_id TO optical_drive_id;
+ALTER TABLE operating_system_specifications RENAME COLUMN spec_id TO operating_system_id;

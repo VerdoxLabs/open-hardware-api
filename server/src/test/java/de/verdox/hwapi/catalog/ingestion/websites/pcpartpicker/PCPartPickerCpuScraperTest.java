@@ -2,7 +2,6 @@ package de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker;
 
 import de.verdox.hwapi.catalog.domain.CPU;
 import de.verdox.hwapi.catalog.domain.HardwareTypes;
-import de.verdox.hwapi.catalog.domain.PCPartPickerProduct;
 import de.verdox.hwapi.catalog.ingestion.api.WebsiteScrapingStrategy;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -61,18 +60,6 @@ class PCPartPickerCpuScraperTest {
         assertThat(cpu.getBoostClockMhz()).isEqualTo(5200d);
         assertThat(cpu.getL3CacheMb()).isEqualTo(96);
         assertThat(cpu.getTdpWatts()).isEqualTo(120);
-    }
-
-    @Test
-    void retainsEverySpecForCategoriesWithoutDedicatedEntities() throws Throwable {
-        Document keyboardPage = parse("Redragon K552 Wired Gaming Keyboard (K552) - PCPartPicker.html", "https://pcpartpicker.com/product/example");
-        PCPartPickerProduct product = new PCPartPickerProduct();
-        product.setCategory("keyboards");
-        product.setSpecifications(strategy.extractSpecMap(keyboardPage));
-
-        assertThat(product.getCategory()).isEqualTo("keyboards");
-        assertThat(product.getSpecifications()).containsEntry("Switch Type", "Outemu Blue");
-        assertThat(product.getSpecifications()).containsKeys("Connection Type", "Layout", "Mechanical");
     }
 
     private static Document parse(String fileName, String baseUri) throws IOException {

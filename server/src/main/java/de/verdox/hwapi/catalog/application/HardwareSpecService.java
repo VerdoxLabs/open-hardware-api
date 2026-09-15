@@ -64,7 +64,19 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             StorageRepository storageRepository,
             DisplayRepository displayRepository,
             FanRepository fanRepository,
-            PCPartPickerProductRepository pcPartPickerProductRepository,
+            HeadphonesRepository headphonesRepository,
+            KeyboardRepository keyboardRepository,
+            MouseRepository mouseRepository,
+            SpeakersRepository speakersRepository,
+            WebcamRepository webcamRepository,
+            SoundCardRepository soundCardRepository,
+            WiredNetworkCardRepository wiredNetworkCardRepository,
+            WirelessNetworkCardRepository wirelessNetworkCardRepository,
+            FanControllerRepository fanControllerRepository,
+            ThermalCompoundRepository thermalCompoundRepository,
+            ExternalHardDriveRepository externalHardDriveRepository,
+            OpticalDriveRepository opticalDriveRepository,
+            OperatingSystemRepository operatingSystemRepository,
             ProductRegistryService productRegistryService
     ) {
         this.baseRepo = baseRepo;
@@ -81,7 +93,19 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         repoByType.put(Storage.class, storageRepository);
         repoByType.put(Display.class, displayRepository);
         repoByType.put(Fan.class, fanRepository);
-        repoByType.put(PCPartPickerProduct.class, pcPartPickerProductRepository);
+        repoByType.put(Headphones.class, headphonesRepository);
+        repoByType.put(Keyboard.class, keyboardRepository);
+        repoByType.put(Mouse.class, mouseRepository);
+        repoByType.put(Speakers.class, speakersRepository);
+        repoByType.put(Webcam.class, webcamRepository);
+        repoByType.put(SoundCard.class, soundCardRepository);
+        repoByType.put(WiredNetworkCard.class, wiredNetworkCardRepository);
+        repoByType.put(WirelessNetworkCard.class, wirelessNetworkCardRepository);
+        repoByType.put(FanController.class, fanControllerRepository);
+        repoByType.put(ThermalCompound.class, thermalCompoundRepository);
+        repoByType.put(ExternalHardDrive.class, externalHardDriveRepository);
+        repoByType.put(OpticalDrive.class, opticalDriveRepository);
+        repoByType.put(OperatingSystem.class, operatingSystemRepository);
 
         this.cache = cache;
 

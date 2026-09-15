@@ -25,7 +25,7 @@ public final class PCPartPickerCpuScraper {
                 .withStrategy(new PCPartPickerStrategy())
                 .withMinLiveRequestInterval(Duration.ofSeconds(60))
                 .withShouldSavePredicate(PCPartPickerCpuScraper::isUsableCatalogSnapshot)
-                .withCPUScrape(cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
+                .withCPUScrape("PCPartPicker/CPU", cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
                             applySpecs(scraped.specs(), target);
                             PCPartPickerImageStore.storeFirstProductImage(scraped.specs(), target);
                         }, CATALOG_URL));
