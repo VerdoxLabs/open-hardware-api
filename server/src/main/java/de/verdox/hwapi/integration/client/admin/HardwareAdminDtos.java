@@ -1,6 +1,7 @@
 package de.verdox.hwapi.integration.client.admin;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class HardwareAdminDtos {
     private HardwareAdminDtos() {}
@@ -18,8 +19,10 @@ public final class HardwareAdminDtos {
     public record ScraperStatus(
             String id, String baseUrl, boolean running, String currentUrl,
             int processedPages, int estimatedPages, String message, String lastError,
-            Instant startedAt, Instant finishedAt
+            Instant startedAt, Instant finishedAt, java.util.List<FailedScrape> failedLinks
     ) {}
+
+    public record FailedScrape(String url, String reason, Instant failedAt) {}
 
     public record BackendStats(
             long totalHardware,
@@ -28,6 +31,25 @@ public final class HardwareAdminDtos {
             long totalListingsTracked,
             long typesCount,
             Instant lastScrapeAt
+    ) {}
+
+    public record CacheOverview(
+            Instant scannedAt,
+            long totalFiles,
+            long totalCatalogPages,
+            long totalRecognizedProducts,
+            long totalDetailPages,
+            List<CacheSource> sources
+    ) {}
+
+    public record CacheSource(
+            String website,
+            String category,
+            long cacheFiles,
+            long paginationPages,
+            long recognizedProducts,
+            long detailPages,
+            Instant latestCachedAt
     ) {}
 
     public record ActionResult(

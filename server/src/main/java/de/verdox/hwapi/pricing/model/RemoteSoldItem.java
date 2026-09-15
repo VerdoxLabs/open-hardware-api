@@ -72,6 +72,22 @@ public class RemoteSoldItem {
     @Column(name = "condition")
     private ItemCondition condition;
 
+    @Column(name = "listing_title", length = 1024)
+    private String listingTitle;
+
+    @Column(name = "matched_ean", length = 14)
+    private String matchedEan;
+
+    @Column(name = "matched_mpn", length = 512)
+    private String matchedMpn;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ebay_match_status", nullable = false)
+    private EbayMatchStatus ebayMatchStatus = EbayMatchStatus.HIGH_CONFIDENCE;
+
+    @Column(name = "ebay_match_reason", length = 1024)
+    private String ebayMatchReason;
+
     /**
      * Logischer Verweis auf die HardwareSpec (Catalog) – bewusst ohne FK.
      * Ermöglicht Joins auf den Catalog, ohne die Deterministik des UUID-PKs zu

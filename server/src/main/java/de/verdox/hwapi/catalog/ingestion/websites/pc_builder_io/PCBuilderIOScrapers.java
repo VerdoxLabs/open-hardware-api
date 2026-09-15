@@ -7,6 +7,7 @@ import de.verdox.hwapi.catalog.domain.PCCase;
 import de.verdox.hwapi.catalog.domain.values.DimensionsMm;
 import org.jsoup.nodes.Document;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ public class PCBuilderIOScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "pc-builder.io")
                 .withStrategy(new PCBuilderIOStrategy())
+                .withMinLiveRequestInterval(Duration.ofSeconds(10))
                 .withChallengePageDetection(CHALLENGE_PREDICATE)
                 .withShouldSavePredicate(SHOULD_SAVE)
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {

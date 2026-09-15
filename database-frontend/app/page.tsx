@@ -1,6 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect -- polling synchronizes the UI with the Spring API */
 import {useCallback, useEffect, useState} from "react";
+import Link from "next/link";
 
 type Tab = "overview" | "database" | "scraper" | "awin";
 type Stats = {
@@ -61,6 +62,22 @@ type Hardware = Record<string, unknown> & {
     displayPictureUrl?: string
 };
 type SearchPage = { content: Hardware[]; totalElements: number; totalPages: number; number: number; size: number };
+type CacheSource = { website: string; category: string; cacheFiles: number; paginationPages: number; recognizedProducts: number; detailPages: number; latestCachedAt?: string };
+type CacheOverview = { scannedAt?: string; totalFiles: number; totalCatalogPages: number; totalRecognizedProducts: number; totalDetailPages: number; sources: CacheSource[] };
+const TYPE_LABELS: Record<string, string> = {
+    cpu: "CPU",
+    gpu: "GPU",
+    gpuchip: "GPU-Chip",
+    ram: "Arbeitsspeicher",
+    cpucooler: "CPU-Kühler",
+    pccase: "Gehäuse",
+    psu: "Netzteil",
+    motherboard: "Mainboard",
+    storage: "Speicher",
+    display: "Monitor",
+    fan: "Lüfter",
+};
+const OBSOLETE_TYPES = new Set(["pcpartpickerproduct"]);
 const tabs: { id: Tab; label: string; icon: string }[] = [{
     id: "overview",
     label: "Übersicht",
@@ -138,7 +155,7 @@ export default function Home() {
             <nav>{tabs.map(x => <button key={x.id} className={tab === x.id ? "nav-item active" : "nav-item"}
                                         onClick={() => setTab(x.id)}><span
                 className="nav-icon">{x.icon}</span>{x.label}{x.id === "scraper" && status?.scrapingRunning &&
-                <i className="nav-pulse"/>}</button>)}</nav>
+                <i className="nav-pulse"/>}</button>)}<Link href="/ebay/" className="nav-item nav-link"><span className="nav-icon">€</span>eBay</Link><Link href="/icecat/" className="nav-item nav-link"><span className="nav-icon">✦</span>Icecat Lab</Link></nav>
             <div className="sidebar-bottom">
                 <div className="api-status"><span
                     className={error ? "status-dot danger" : "status-dot"}/>{error ? "API offline" : "API verbunden"}
@@ -236,9 +253,9 @@ function Activity({t, d, i}: { t: string; d: string; i: string }) {
 }
 
 function Database() {
-    const [q, setQ] = useState(""), [type, setType] = useState(""), [manufacturer, setManufacturer] = useState(""), [identifier, setIdentifier] = useState(""), [sort, setSort] = useState("name"), [types, setTypes] = useState<string[]>([]), [rows, setRows] = useState<Hardware[]>([]), [page, setPage] = useState(0), [totalPages, setTotalPages] = useState(0), [totalElements, setTotalElements] = useState(0), [loading, setLoading] = useState(false), [searched, setSearched] = useState(false), [selected, setSelected] = useState<Hardware>(), [backupMessage, setBackupMessage] = useState(""), [importing, setImporting] = useState(false);
+    const [q, setQ] = useState(""), [type, setType] = useState(""), [manufacturer, setManufacturer] = useState(""), [identifier, setIdentifier] = useState(""), [sort, setSort] = useState("name"), [types, setTypes] = useState<string[]>([]), [rows, setRows] = useState<Hardware[]>([]), [page, setPage] = useState(0), [totalPages, setTotalPages] = useState(0), [totalElements, setTotalElements] = useState(0), [loading, setLoading] = useState(false), [searched, setSearched] = useState(false), [backupMessage, setBackupMessage] = useState(""), [importing, setImporting] = useState(false);
     useEffect(() => {
-        api<string[]>("/api/v1/specs/types").then(setTypes).catch(() => undefined)
+        api<string[]>("/api/v1/specs/types").then(values => setTypes(values.filter(value => !OBSOLETE_TYPES.has(value.toLowerCase())).sort((a, b) => (TYPE_LABELS[a.toLowerCase()] || a).localeCompare(TYPE_LABELS[b.toLowerCase()] || b, "de")))).catch(() => undefined)
     }, []);
     const search = async (targetPage = 0) => {
         setLoading(true);
@@ -295,7 +312,7 @@ function Database() {
                                                          placeholder="Suche nach Modell, MPN oder EAN …"/><input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="Hersteller …"/><input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="MPN / EAN …"/><select
             value={type} onChange={e => setType(e.target.value)}>
             <option value="">Alle Typen</option>
-            {types.map(x => <option key={x}>{x}</option>)}</select>
+            {types.map(x => <option key={x} value={x}>{TYPE_LABELS[x.toLowerCase()] || x}</option>)}</select>
             <select value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name A–Z</option><option value="id">Neueste ID</option></select><button onClick={() => search()} disabled={loading}>{loading ? "Suche …" : "Suchen"}</button>
         </div>
         {!searched ? <div className="empty">
@@ -322,7 +339,7 @@ function Database() {
                     <td><span className="type-tag">{String(r.specType || "—")}</span></td>
                     <td><small>{[...(r.mpns || []), ...(r.eans || [])].slice(0, 3).join(" · ") || "—"}</small></td>
                     <td>
-                        <button className="row-action" onClick={() => setSelected(r)}>Ansehen →</button>
+                        <Link className="row-action" href={`/hardware?type=${encodeURIComponent(String(r.specType || ""))}&mpn=${encodeURIComponent(r.mpns?.[0] || "")}`}>Details ansehen →</Link>
                     </td>
                 </tr>)}</tbody>
             </table>
@@ -330,22 +347,11 @@ function Database() {
                 <div className="empty compact"><h3>Keine Treffer</h3><p>Versuche eine andere Suche oder entferne den
                     Filter.</p></div>}
             {totalPages > 1 && <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderTop: "1px solid var(--line)"}}><button className="row-action" disabled={page === 0 || loading} onClick={() => search(page - 1)}>← Zurück</button><span className="muted">Seite {page + 1} von {totalPages}</span><button className="row-action" disabled={page + 1 >= totalPages || loading} onClick={() => search(page + 1)}>Weiter →</button></div>}</div>}
-        {selected && <div role="dialog" aria-modal="true" onClick={() => setSelected(undefined)} style={{position: "fixed", inset: 0, zIndex: 20, background: "rgba(21,35,59,.45)", display: "grid", placeItems: "center", padding: 20}}>
-            <div onClick={e => e.stopPropagation()} style={{background: "#fff", borderRadius: 14, width: "min(760px, 100%)", maxHeight: "90vh", overflow: "auto", padding: 26, boxShadow: "0 20px 70px rgba(21,35,59,.25)"}}>
-                <div style={{display: "flex", justifyContent: "space-between", gap: 20, alignItems: "start"}}>
-                    <div><span className="kicker">HARDWARE-DETAILS</span><h2 style={{margin: "9px 0 4px"}}>{display(selected)}</h2><p style={{color: "var(--muted)", fontSize: 12, margin: 0}}>{String(selected.specType || "Komponente")}</p></div>
-                    <button className="icon-button" onClick={() => setSelected(undefined)} aria-label="Schließen">×</button>
-                </div>
-                {picture(selected) && <img src={picture(selected)} alt={display(selected)} style={{display: "block", width: "100%", height: 220, objectFit: "contain", margin: "22px 0", background: "#f7f9fc", borderRadius: 10}}/>}
-                <div className="info-grid"><Info l="Hersteller" v={String(selected.manufacturer || "—")}/><Info l="MPN" v={(selected.mpns || []).join(", ") || "—"}/><Info l="EAN" v={(selected.eans || []).join(", ") || "—"}/></div>
-                <div style={{marginTop: 22}}><span className="kicker">TECHNISCHE DATEN</span><div style={{display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginTop: 12}}>{Object.entries(selected).filter(([key, value]) => !["id", "manufacturer", "model", "displayName", "pictureUrls", "displayPictureUrl", "mpns", "eans"].includes(key) && value !== null && value !== undefined && typeof value !== "object").map(([key, value]) => <div key={key} style={{padding: "10px 12px", background: "#f7f9fc", borderRadius: 8}}><small style={{display: "block", color: "var(--muted)", fontSize: 10}}>{key}</small><strong style={{fontSize: 12}}>{String(value)}</strong></div>)}</div></div>
-            </div>
-        </div>}
     </section>
 }
 
 function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => void }) {
-    const [msg, setMsg] = useState("");
+    const [msg, setMsg] = useState(""), [recentHardware, setRecentHardware] = useState<Hardware[]>([]), [cache, setCache] = useState<CacheOverview>();
     const restart = async () => {
         try {
             const r = await api<{ message: string }>("/api/v1/admin/scraping/restart", {method: "POST"});
@@ -356,6 +362,22 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
         }
     };
     const progress = Math.round((status?.progress01 ?? 0) * 100);
+    const runningProcesses = status?.scrapers?.filter(x => x.running).length ?? 0;
+    const processedPages = status?.scrapers?.reduce((sum, x) => sum + x.processedPages, 0) ?? 0;
+    const loadRecentHardware = useCallback(async () => {
+        try {
+            const result = await api<SearchPage>("/api/v1/specs/search/page?page=0&size=5&sort=id");
+            setRecentHardware(result.content);
+        } catch { /* the main status indicator owns connectivity feedback */ }
+    }, []);
+    useEffect(() => { void loadRecentHardware(); }, [loadRecentHardware, status?.scrapingRunning, status?.lastFinishedAt]);
+    useEffect(() => {
+        const load = () => api<CacheOverview>("/api/v1/admin/cache/overview").then(setCache).catch(() => undefined);
+        load();
+        const timer = window.setInterval(load, 15000);
+        return () => window.clearInterval(timer);
+    }, [status?.scrapingRunning]);
+    const display = (r: Hardware) => String(r.model || r.name || r.modelName || r.displayName || r.title || r.id || "Unbenannt");
     return <section className="content">
         <div className="page-intro">
             <div><span className="kicker">INGESTION PIPELINE</span><h2>Scraper-Zentrale</h2><p>Überwache laufende Jobs
@@ -363,30 +385,25 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
             <button className="primary-button" onClick={restart}
                     disabled={status?.scrapingRunning}>↻ {status?.scrapingRunning ? "Läuft gerade" : "Scraper starten"}</button>
         </div>
-        <div className="scraper-card">
-            <div className="scraper-state"><span
-                className={status?.scrapingRunning ? "big-status active" : "big-status"}>{status?.scrapingRunning ? "↻" : "✓"}</span>
-                <div><span className="kicker">AKTUELLER STATUS</span>
-                    <h3>{status?.scrapingRunning ? "Scraper läuft" : "Scraper ist bereit"}</h3>
-                    <p>{status?.message || "Kein aktiver Lauf. Der nächste geplante Lauf wird automatisch ausgeführt."}</p>
-                </div>
+        <div className="scraper-dashboard">
+            <div className="scraper-card scraper-live-card">
+                <div className="scraper-card-top"><div className="scraper-state"><span className={status?.scrapingRunning ? "big-status active" : "big-status"}>{status?.scrapingRunning ? "↻" : "✓"}</span><div><span className="kicker">AKTUELLER STATUS</span><h3>{status?.scrapingRunning ? "Scraper läuft" : "Scraper ist bereit"}</h3><p>{status?.message || "Kein aktiver Lauf. Der nächste geplante Lauf wird automatisch ausgeführt."}</p></div></div><div className={status?.scrapingRunning ? "progress-ring active" : "progress-ring"} style={{"--progress": `${progress * 3.6}deg`} as React.CSSProperties}><span>{progress}%</span></div></div>
+                <div className="progress-meta"><span>Gesamtfortschritt</span><strong>{progress}%</strong></div><div className="progress"><span style={{width: `${progress}%`}}/></div>
+                <div className="scraper-kpis"><div><strong>{runningProcesses}</strong><small>aktive Quellen</small></div><div><strong>{num(processedPages)}</strong><small>Seiten verarbeitet</small></div><div><strong>{date(status?.lastFinishedAt)}</strong><small>letzter Abschluss</small></div></div>
             </div>
-            {status?.scrapingRunning && <>
-                <div className="progress-meta"><span>Fortschritt</span><strong>{progress}%</strong></div>
-                <div className="progress"><span style={{width: `${progress}%`}}/></div>
-            </>}
-            <div className="info-grid"><Info l="Gestartet" v={date(status?.startedAt)}/><Info l="Letzter Abschluss"
-                                                                                              v={date(status?.lastFinishedAt)}/><Info
-                l="Fehler" v="Über API-Status sichtbar"/></div>
+            <div className="scraper-new-data panel"><div className="panel-head"><div><span className="kicker">FRISCH IM KATALOG</span><h3>Zuletzt erkannte Hardware</h3></div><span className="live"><span className="live-dot"/>Live</span></div><p className="panel-note">Die neuesten Einträge aus dem Katalog — nach der letzten ID sortiert.</p><div className="new-hardware-list">{recentHardware.map((item, i) => <div className="new-hardware" key={String(item.id ?? i)}><span className="new-hardware-index">{String(i + 1).padStart(2, "0")}</span><div><strong>{display(item)}</strong><small>{String(item.manufacturer || "Hersteller unbekannt")} · {String(item.specType || "Komponente")}</small></div><span className="new-tag">NEU</span></div>)}{!recentHardware.length && <div className="empty compact"><h3>Noch keine Einträge</h3><p>Nach dem ersten Lauf erscheinen neue Datensätze hier.</p></div>}</div></div>
         </div>
         {msg && <div className="alert">{msg}</div>}
-        <div className="panel scraper-processes">
-            <div className="panel-head"><h3>Parallele Scraper-Prozesse</h3><span className="muted">Live-Aktualisierung alle 3 Sekunden</span></div>
+        <div className="panel scraper-processes"><div className="panel-head"><div><span className="kicker">LIVE-PIPELINE</span><h3>Quellen &amp; Prozesse</h3></div><span className="muted">Update alle 3 Sekunden</span></div>
             <div className="scraper-process-list">
                 {(status?.scrapers || []).map(scraper => <ScraperProcess key={scraper.id} scraper={scraper}/>)}</div>
             {!status?.scrapers?.length && <div className="empty compact"><h3>Noch keine Prozessdaten</h3><p>Die API liefert die einzelnen Scraper-Prozesse beim nächsten Lauf.</p></div>}
         </div>
-        <div className="panel">
+        <div className="panel scraper-cache"><div className="panel-head"><div><span className="kicker">DATEI-CACHE</span><h3>Erkannt vs. gecached</h3></div><span className="muted">Scan {date(cache?.scannedAt)}</span></div>
+            <div className="scraper-kpis cache-kpis"><div><strong>{num(cache?.totalCatalogPages)}</strong><small>Pagination-Seiten</small></div><div><strong>{num(cache?.totalRecognizedProducts)}</strong><small>erkannte Produkte</small></div><div><strong>{num(cache?.totalDetailPages)}</strong><small>gecachte Detailseiten</small></div></div>
+            <div className="table-wrap cache-table"><table><thead><tr><th>Website</th><th>Kategorie</th><th>Cache-Dateien</th><th>Pagination</th><th>Erkannt</th><th>Details gecached</th><th>Zuletzt</th></tr></thead><tbody>{(cache?.sources || []).filter(source => source.paginationPages > 0 || source.detailPages > 0).map(source => <tr key={`${source.website}-${source.category}`}><td>{source.website}</td><td>{source.category}</td><td>{num(source.cacheFiles)}</td><td>{num(source.paginationPages)}</td><td>{num(source.recognizedProducts)}</td><td><strong>{num(source.detailPages)}</strong></td><td>{date(source.latestCachedAt)}</td></tr>)}</tbody></table>{!(cache?.sources || []).some(source => source.paginationPages > 0 || source.detailPages > 0) && <div className="empty compact"><h3>Noch keine relevanten Cache-Daten</h3><p>Angezeigt werden nur Quellen mit Pagination- oder Detailseiten.</p></div>}</div>
+        </div>
+        <div className="panel scraper-health">
             <div className="panel-head"><h3>Fehlerbehandlung</h3><span className="muted">Live aus Backend-Status</span>
             </div>
             <div className="health-row"><span className="health-icon">!</span>
@@ -396,10 +413,6 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
         </div>
     </section>
 };
-
-function Info({l, v}: { l: string; v: string }) {
-    return <div><small>{l}</small><strong>{v}</strong></div>
-}
 
 function ScraperProcess({scraper}: { scraper: ScraperStatus }) {
     const progress = scraper.estimatedPages > 1

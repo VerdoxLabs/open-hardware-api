@@ -7,6 +7,7 @@ import de.verdox.hwapi.catalog.domain.HardwareTypes;
 import de.verdox.hwapi.catalog.domain.PCCase;
 import de.verdox.hwapi.catalog.domain.values.*;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.logging.Level;
@@ -17,6 +18,7 @@ public class PCKomboScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "pc-kombo.com")
                 .withStrategy(new PCKomboStrategy())
+                .withMinLiveRequestInterval(Duration.ofSeconds(10))
 
                 .withCPUScrape(cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();

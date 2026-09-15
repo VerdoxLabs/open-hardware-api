@@ -3,6 +3,7 @@ package de.verdox.hwapi.pricing.repository;
 import de.verdox.hwapi.catalog.domain.values.Currency;
 import de.verdox.hwapi.catalog.domain.values.ItemCondition;
 import de.verdox.hwapi.pricing.model.RemoteSoldItem;
+import de.verdox.hwapi.pricing.model.EbayMatchStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -35,11 +36,13 @@ public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, 
         FROM RemoteSoldItem r
         WHERE r.ean IN :identifiers
           AND r.condition IN :conditions
+          AND r.ebayMatchStatus = :matchStatus
           AND r.sellDate >= :fromDate
         """)
     List<RemoteSoldItem> findPricePointsInternal(
             @Param("identifiers") Set<String> identifiers,
             @Param("conditions") Set<ItemCondition> conditions,
+            @Param("matchStatus") EbayMatchStatus matchStatus,
             @Param("fromDate") LocalDate fromDate
     );
 
@@ -65,7 +68,7 @@ public interface RemoteSoldItemRepository extends JpaRepository<RemoteSoldItem, 
         if (identifiers.isEmpty()) return List.of();
 
         LocalDate fromDate = LocalDate.now().minusMonths(monthSince);
-        return findPricePointsInternal(identifiers, conditions, fromDate);
+        return findPricePointsInternal(identifiers, conditions, EbayMatchStatus.VERIFIED, fromDate);
     }
 
     @Query("""

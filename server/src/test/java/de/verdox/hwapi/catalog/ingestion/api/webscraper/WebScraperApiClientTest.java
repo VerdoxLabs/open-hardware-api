@@ -72,4 +72,26 @@ class WebScraperApiClientTest {
                 .contains("\"engine\":\"js\"")
                 .contains("\"waitForSelector\":\"#category_content tr.tr__product\"");
     }
+
+    @Test
+    void forcesEbayRequestsThroughAkamaiBrowserEngine() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/v1/raw", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "<html><body>results</body></html>".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        WebScraperApiClient client = new WebScraperApiClient(
+                "http://localhost:" + server.getAddress().getPort(), "secret", "auto",
+                Duration.ofSeconds(5), new ObjectMapper());
+
+        client.fetchHtml("https://www.ebay.de/sch/164/i.html?_nkw=7800X3D");
+
+        assertThat(requestBody.get()).contains("\"engine\":\"akamai\"");
+    }
 }

@@ -52,10 +52,12 @@ public class HardwareBackupService {
             manifest.put("formatVersion", FORMAT_VERSION);
             manifest.put("createdAt", OffsetDateTime.now(ZoneOffset.UTC).toString());
             manifest.put("entityCount", specs.size());
-            manifest.put("description", "One hardware entity per JSON file. IDs are informational and are not reused on import.");
+            manifest.put("description", "One hardware entity per JSON file. File names are derived from the hardware name; IDs are informational and are not reused on import.");
             writeEntry(zip, "manifest.json", objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));
+            Set<String> usedFileNames = new HashSet<>();
             for (HardwareSpec<?> spec : specs) {
-                writeEntry(zip, "hardware/" + typeName(spec.getClass()) + "/" + spec.getId() + ".json",
+                String fileName = uniqueFileName(sanitizeFileName(spec.displayName()), usedFileNames);
+                writeEntry(zip, "hardware/" + typeName(spec.getClass()) + "/" + fileName + ".json",
                         objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(spec));
             }
         }
@@ -70,7 +72,7 @@ public class HardwareBackupService {
         List<ImportedSpec> imported = new ArrayList<>();
         for (Map.Entry<String, byte[]> entry : files.entrySet()) {
             String[] parts = entry.getKey().split("/");
-            if (parts.length != 3 || !"hardware".equals(parts[0]) || !parts[2].matches("\\d+\\.json")) throw new IllegalArgumentException("Ungültiger Dateipfad im Backup: " + entry.getKey());
+            if (parts.length != 3 || !"hardware".equals(parts[0]) || !isHardwareFileName(parts[2])) throw new IllegalArgumentException("Ungültiger Dateipfad im Backup: " + entry.getKey());
             Class<? extends HardwareSpec<?>> type = TYPES.get(parts[1]);
             if (type == null) throw new IllegalArgumentException("Unbekannter Hardwaretyp im Backup: " + parts[1]);
             // Exported entities also contain read-only presentation fields (for example displayPictureUrl).
@@ -124,6 +126,34 @@ public class HardwareBackupService {
     private String typeName(Class<?> type) {
         return TYPES.entrySet().stream().filter(entry -> entry.getValue().equals(type)).map(Map.Entry::getKey).findFirst().orElseThrow(() -> new IllegalArgumentException("Nicht exportierbarer Hardwaretyp: " + type.getName()));
     }
+
+    private static String uniqueFileName(String baseName, Set<String> usedFileNames) {
+        String candidate = baseName;
+        int suffix = 2;
+        while (!usedFileNames.add(candidate)) {
+            candidate = baseName + "-" + suffix++;
+        }
+        return candidate;
+    }
+
+    private static boolean isHardwareFileName(String fileName) {
+        if (fileName == null || !fileName.endsWith(".json")) return false;
+        String baseName = fileName.substring(0, fileName.length() - ".json".length());
+        return !baseName.isBlank()
+                && !baseName.equals(".")
+                && !baseName.equals("..")
+                && !fileName.contains("\\")
+                && sanitizeFileName(baseName).equals(baseName);
+    }
+
+    private static String sanitizeFileName(String name) {
+        String sanitized = name == null ? "" : name
+                .replaceAll("[^\\p{L}\\p{N}._-]", "_")
+                .replaceAll("_{2,}", "_")
+                .replaceAll("^[._-]+|[._-]+$", "");
+        return sanitized.isBlank() ? "hardware" : sanitized;
+    }
+
     private void writeEntry(ZipOutputStream zip, String name, byte[] bytes) throws IOException { zip.putNextEntry(new ZipEntry(name)); zip.write(bytes); zip.closeEntry(); }
     private record ImportedSpec(long sourceId, HardwareSpec<?> spec) {}
     public record ImportResult(int importedEntities, int filesRead, String message) {}

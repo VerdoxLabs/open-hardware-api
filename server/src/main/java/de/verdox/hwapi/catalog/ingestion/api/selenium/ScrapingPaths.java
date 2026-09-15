@@ -9,6 +9,10 @@ public final class ScrapingPaths {
 
     private ScrapingPaths() {}
 
+    public static Path root() {
+        return ROOT;
+    }
+
     public static Path fileFor(PageKey key) {
         return fileFor(key.domain(), key.id(), key.url());
     }

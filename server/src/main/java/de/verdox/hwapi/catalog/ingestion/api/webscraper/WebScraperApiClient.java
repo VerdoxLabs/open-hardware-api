@@ -34,11 +34,12 @@ public final class WebScraperApiClient {
     public String fetchHtml(String url) {
         try {
             boolean pcPartPickerCatalog = isPcPartPickerCatalog(url);
+            boolean akamaiProtectedSite = isEbay(url);
             ObjectNode body = objectMapper.createObjectNode()
                     .put("url", url)
                     // PCPartPicker's catalog rows are populated after the initial
                     // document response; a static/auto shell has an empty tbody.
-                    .put("engine", pcPartPickerCatalog ? "js" : engine);
+                    .put("engine", pcPartPickerCatalog ? "js" : akamaiProtectedSite ? "akamai" : engine);
             if (pcPartPickerCatalog) {
                 body.put("waitForSelector", "#category_content tr.tr__product");
             }
@@ -81,6 +82,43 @@ public final class WebScraperApiClient {
             URI uri = URI.create(url);
             return uri.getHost() != null && uri.getHost().endsWith("pcpartpicker.com")
                     && uri.getPath().startsWith("/products/");
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isEbay(String url) {
+        try {
+            URI uri = URI.create(url);
+            String host = uri.getHost();
+            return host != null && (host.equalsIgnoreCase("ebay.de")
+                    || host.endsWith(".ebay.de")
+                    || host.equalsIgnoreCase("ebay.com")
+                    || host.endsWith(".ebay.com")
+                    || host.equalsIgnoreCase("ebay.at")
+                    || host.endsWith(".ebay.at")
+                    || host.equalsIgnoreCase("ebay.ch")
+                    || host.endsWith(".ebay.ch")
+                    || host.equalsIgnoreCase("ebay.co.uk")
+                    || host.endsWith(".ebay.co.uk")
+                    || host.equalsIgnoreCase("ebay.ie")
+                    || host.endsWith(".ebay.ie")
+                    || host.equalsIgnoreCase("ebay.fr")
+                    || host.endsWith(".ebay.fr")
+                    || host.equalsIgnoreCase("ebay.it")
+                    || host.endsWith(".ebay.it")
+                    || host.equalsIgnoreCase("ebay.es")
+                    || host.endsWith(".ebay.es")
+                    || host.equalsIgnoreCase("ebay.be")
+                    || host.endsWith(".ebay.be")
+                    || host.equalsIgnoreCase("ebay.nl")
+                    || host.endsWith(".ebay.nl")
+                    || host.equalsIgnoreCase("ebay.pl")
+                    || host.endsWith(".ebay.pl")
+                    || host.equalsIgnoreCase("ebay.com.au")
+                    || host.endsWith(".ebay.com.au")
+                    || host.equalsIgnoreCase("ebay.ca")
+                    || host.endsWith(".ebay.ca"));
         } catch (IllegalArgumentException ignored) {
             return false;
         }

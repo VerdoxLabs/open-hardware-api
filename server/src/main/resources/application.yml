@@ -77,6 +77,14 @@ ebay:
       - ${EBAY_FEED_MARKETPLACE_3:SWITZERLAND}
       - ${EBAY_FEED_MARKETPLACE_4:USA}
       - ${EBAY_FEED_MARKETPLACE_5:UK}
+
+icecat:
+  enabled: ${ICECAT_ENABLED:false}
+  base-url: ${ICECAT_BASE_URL:https://live.icecat.biz/api}
+  language: ${ICECAT_LANGUAGE:DE}
+  shop-name: ${ICECAT_SHOP_NAME:}
+  api-token: ${ICECAT_API_TOKEN:}
+  content-token: ${ICECAT_CONTENT_TOKEN:}
 spring:
   servlet:
     multipart:

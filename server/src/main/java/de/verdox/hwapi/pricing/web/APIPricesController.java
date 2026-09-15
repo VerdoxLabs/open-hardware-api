@@ -16,6 +16,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/prices/sold")
@@ -33,6 +34,26 @@ public class APIPricesController {
         this.service = service;
         this.itemPriceService = itemPriceService;
         this.hardwareSpecService = hardwareSpecService;
+    }
+
+    @GetMapping("/ebay/marketplaces")
+    public List<Map<String, String>> ebayMarketplaces() {
+        return service.getSupportedMarketplaces().stream()
+                .map(m -> Map.of("id", m.name(), "domain", m.getDomain(), "country", m.getCountry().name()))
+                .toList();
+    }
+
+    @PostMapping("/ebay/lookups")
+    public ResponseEntity<Map<String, UUID>> queueEbayLookup(@RequestBody Map<String, String> body) {
+        String identifier = body == null ? null : body.get("identifier");
+        UUID jobId = service.queueEbayLookup(identifier);
+        return ResponseEntity.accepted().body(Map.of("jobId", jobId));
+    }
+
+    @GetMapping("/ebay/lookups/{jobId}")
+    public ResponseEntity<EbayCompletedListingsService.EbayLookupJobResponse> ebayLookupStatus(@PathVariable UUID jobId) {
+        var result = service.getEbayLookupJob(jobId);
+        return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
     }
 
     // ------------------------------------------------------------

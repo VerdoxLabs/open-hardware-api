@@ -22,8 +22,10 @@ import java.text.ParseException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
@@ -37,6 +39,10 @@ public class EbayScraper {
         this.seleniumBasedWebScraper = new SeleniumBasedWebScraper(id, new FScrapingCache(), new CookieJar(DataStorage.resolve("scraping")));
         seleniumBasedWebScraper.setIsChallengePage((s, doc) -> {
 
+            if (isLoginPage(doc)) {
+                return true;
+            }
+
             if (doc.selectFirst("div.pgHeading") != null) {
                 return true;
             }
@@ -44,6 +50,8 @@ public class EbayScraper {
             String titleTag = Optional.ofNullable(doc.title()).orElse("").toLowerCase(Locale.ROOT);
             return titleTag.contains("störung") || titleTag.contains("geprüft") || titleTag.contains("captcha");
         });
+        // Login pages are not valid eBay results and must never replace a usable cached page.
+        seleniumBasedWebScraper.setShouldSavePage((s, doc) -> !isLoginPage(doc));
     }
 
     /**
@@ -54,11 +62,14 @@ public class EbayScraper {
         int ipg = Math.max(10, Math.min(240, perPage));
 
         int pgn = Math.max(1, page);
+        String host = marketplace.getDomain().startsWith("ebay.")
+                ? "www." + marketplace.getDomain()
+                : marketplace.getDomain();
 
         if (marketplace.equals(EbayMarketplace.GERMANY)) {
-            return "https://www." + marketplace.getDomain() + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&LH_SellerType=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&LH_PrefLoc=3" + "&mkcid=2" + "&_blrs=spell_auto_correct";
+            return "https://" + host + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&LH_SellerType=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&LH_PrefLoc=3" + "&mkcid=2" + "&_blrs=spell_auto_correct";
         } else {
-            return "https://www." + marketplace.getDomain() + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&mkcid=2" + "&_blrs=spell_auto_correct";
+            return "https://" + host + "/sch/" + ebayCategory.getEbayCategoryId() + "/i.html" + "?_nkw=" + q + "&LH_Complete=1" + "&LH_Sold=1" + "&LH_TitleDesc=1" + "&_fslt=1" + "&_ipg=" + ipg + "&_pgn=" + pgn + "&mkcid=2" + "&_blrs=spell_auto_correct";
         }
     }
 
@@ -138,6 +149,44 @@ public class EbayScraper {
             }
         }
         return out;
+    }
+
+    /** Fetches the individual item page, where eBay exposes EAN/GTIN and MPN as item specifics. */
+    public EbayListingDetails fetchListingDetails(EbayMarketplace marketplace, String itemId) throws Exception {
+        String host = marketplace.getDomain().startsWith("ebay.") ? "www." + marketplace.getDomain() : marketplace.getDomain();
+        String url = "https://" + host + "/itm/" + URLEncoder.encode(itemId, StandardCharsets.UTF_8);
+        Document doc = seleniumBasedWebScraper.fetch(marketplace.getDomain(), "item-" + itemId, url,
+                new FetchOptions().setTryHeadlessFirst(true).setTtl(Duration.ofHours(12)).setSkipIfNotCache(false));
+
+        Map<String, String> specifics = new LinkedHashMap<>();
+        for (Element row : doc.select("dl.ux-labels-values")) {
+            Element label = row.selectFirst("dt");
+            Element value = row.selectFirst("dd");
+            if (label != null && value != null && !label.text().isBlank() && !value.text().isBlank()) {
+                specifics.putIfAbsent(label.text().trim(), value.text().trim());
+            }
+        }
+        for (Element meta : doc.select("meta[itemprop]")) {
+            String key = meta.attr("itemprop").trim();
+            String value = meta.attr("content").trim();
+            if (!key.isBlank() && !value.isBlank()) specifics.putIfAbsent(key, value);
+        }
+        String title = Optional.ofNullable(doc.selectFirst("h1.x-item-title__mainTitle span"))
+                .map(Element::text).filter(t -> !t.isBlank()).orElse(doc.title());
+        return new EbayListingDetails(title, Map.copyOf(specifics));
+    }
+
+    private static boolean isLoginPage(Document doc) {
+        if (doc == null) return true;
+        String title = Optional.ofNullable(doc.title()).orElse("").toLowerCase(Locale.ROOT);
+        String text = doc.body() == null ? "" : doc.body().text().toLowerCase(Locale.ROOT);
+        String html = doc.html().toLowerCase(Locale.ROOT);
+        return title.contains("sign in") || title.contains("signin") || title.contains("login")
+                || title.contains("anmelden") || title.contains("einloggen")
+                || html.contains("signin.ebay.") || html.contains("signin.ebaystatic.")
+                || doc.select("form[action*=signin], form[action*=login], input[name=_email]").size() > 0
+                || text.contains("sign in to ebay") || text.contains("bei ebay anmelden")
+                || text.contains("einloggen");
     }
 
 

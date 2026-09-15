@@ -228,18 +228,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         // Ergebnis dedupen (ein Spec kann über mehrere Keys gefunden werden)
         Map<Long, HardwareSpec<?>> resultById = new LinkedHashMap<>();
 
-        // Misses sammeln
+        // Do not return cached JPA entities here. They may be detached and still
+        // contain lazy subtype collections which are accessed by merge().
         List<String> misses = new ArrayList<>(decodedKeys.size());
-
         for (String key : decodedKeys) {
             if (key == null || key.isBlank()) continue;
-
-            HardwareSpec<?> cached = cache.getByKey(key);
-            if (cached != null) {
-                resultById.putIfAbsent(cached.getId(), cached);
-            } else {
-                misses.add(key);
-            }
+            misses.add(key);
         }
 
         if (misses.isEmpty()) {
@@ -251,7 +245,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             int end = Math.min(i + KEY_CHUNK, misses.size());
             List<String> chunk = misses.subList(i, end);
 
-            List<HardwareSpec<?>> found = baseRepo.findAllByEanOrMpn(chunk);
+            List<HardwareSpec<?>> found = loadWithSpecificGraphs(baseRepo.findAllByEanOrMpn(chunk));
             for (HardwareSpec<?> spec : found) {
                 if (spec == null) continue;
                 resultById.putIfAbsent(spec.getId(), spec);
@@ -537,12 +531,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 int end = Math.min(i + chunkSize, list.size());
                 Set<String> eChunk = new HashSet<>(list.subList(i, end));
 
-                List<HardwareSpec<?>> found = baseRepo.findAllByAnyEanOrMpnIn(
+                List<HardwareSpec<?>> found = loadWithSpecificGraphs(baseRepo.findAllByAnyEanOrMpnIn(
                         eChunk,
                         Collections.emptySet(),
                         true,
                         false
-                );
+                ));
                 for (HardwareSpec<?> s : found) {
                     byId.putIfAbsent(s.getId(), s);
                 }
@@ -556,12 +550,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 Set<String> mChunk = new HashSet<>(list.subList(i, end));
 
                 // nur MPNs
-                List<HardwareSpec<?>> found = baseRepo.findAllByAnyEanOrMpnIn(
+                List<HardwareSpec<?>> found = loadWithSpecificGraphs(baseRepo.findAllByAnyEanOrMpnIn(
                         Collections.emptySet(),
                         mChunk,
                         false,
                         true
-                );
+                ));
                 for (HardwareSpec<?> s : found) {
                     byId.putIfAbsent(s.getId(), s);
                 }
@@ -569,6 +563,38 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
 
         return new ArrayList<>(byId.values());
+    }
+
+    /**
+     * Base-repository polymorphic queries only fetch the identifier collections.
+     * Reload each concrete type through its repository so its merge-relevant
+     * collections are fetched by the subtype entity graph as well.
+     */
+    private List<HardwareSpec<?>> loadWithSpecificGraphs(List<HardwareSpec<?>> specs) {
+        if (specs == null || specs.isEmpty()) return List.of();
+
+        Map<Class<?>, List<Long>> idsByType = specs.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(HardwareSpec::getClass,
+                        LinkedHashMap::new,
+                        Collectors.mapping(HardwareSpec::getId, Collectors.toList())));
+
+        Map<Long, HardwareSpec<?>> reloadedById = new HashMap<>();
+        for (Map.Entry<Class<?>, List<Long>> entry : idsByType.entrySet()) {
+            @SuppressWarnings("rawtypes")
+            HardwareSpecificRepo repo = repoByType.get(entry.getKey());
+            if (repo == null) continue;
+            for (Object reloaded : repo.findAllByIdInOrderByIdAsc(entry.getValue())) {
+                HardwareSpec<?> spec = (HardwareSpec<?>) reloaded;
+                reloadedById.put(spec.getId(), spec);
+            }
+        }
+
+        List<HardwareSpec<?>> result = new ArrayList<>(specs.size());
+        for (HardwareSpec<?> spec : specs) {
+            result.add(reloadedById.getOrDefault(spec.getId(), spec));
+        }
+        return result;
     }
 
     private void indexKeys(HardwareSpec<?> spec,

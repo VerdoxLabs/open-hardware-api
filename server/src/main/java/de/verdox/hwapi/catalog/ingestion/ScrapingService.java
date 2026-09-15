@@ -251,16 +251,22 @@ public class ScrapingService {
                         updateCurrentPage(scraper, page.singlePageCandidate().urls());
                         try {
                             var map = scraper.extract(page);
-                            if (map == null) return null;
+                            if (map == null) {
+                                recordFailedLink(scraper, page.singlePageCandidate().urls(), "Keine Daten extrahiert");
+                                return null;
+                            }
                             var result = scraper.parse(map, this::callScrapeEvent);
                             result.ifPresent(hardwareSpec -> {
                                 scraper.markProcessed(page);
                                 setStatus("Scraper: " + hardwareSpec.getMpnsSorted().getFirst()
                                         + " / " + scraper.id() + " [" + counter.getAndIncrement() + "]");
                             });
+                            if (result.isEmpty()) {
+                                recordFailedLink(scraper, page.singlePageCandidate().urls(), "Keine Hardware erkannt");
+                            }
                             return result.orElse(null);
                         } catch (Throwable t) {
-                            progressError(scraper, t);
+                            progressError(scraper, page.singlePageCandidate().urls(), t);
                             LOGGER.log(Level.SEVERE, "Page processing failed", t);
                             return null;
                         } finally {
@@ -276,7 +282,7 @@ public class ScrapingService {
             LOGGER.info("Scraper " + scraper.id() + " finished in "
                     + (System.currentTimeMillis() - start) + " ms");
         } catch (Throwable t) {
-            progressError(scraper, t);
+            progressError(scraper, null, t);
             LOGGER.log(Level.SEVERE, "Scraper crashed: " + scraper.id(), t);
         } finally {
             if (progress != null) progress.finish();
@@ -321,9 +327,20 @@ public class ScrapingService {
                 + (url == null ? "" : " → " + url));
     }
 
-    private void progressError(ComponentWebScraper<?> scraper, Throwable error) {
+    private void progressError(ComponentWebScraper<?> scraper, Set<String> urls, Throwable error) {
         ScraperProgress progress = scraperProgress.get(scraper.id());
-        if (progress != null) progress.error(error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+        if (progress != null) {
+            String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+            progress.error(message);
+            recordFailedLink(scraper, urls, message);
+        }
+    }
+
+    private void recordFailedLink(ComponentWebScraper<?> scraper, Set<String> urls, String reason) {
+        ScraperProgress progress = scraperProgress.get(scraper.id());
+        if (progress != null && urls != null) {
+            urls.forEach(url -> progress.failedLink(url, reason));
+        }
     }
 
     private static final class ScraperProgress {
@@ -337,6 +354,7 @@ public class ScrapingService {
         private volatile String lastError;
         private volatile Instant startedAt;
         private volatile Instant finishedAt;
+        private final List<HardwareAdminDtos.FailedScrape> failedLinks = Collections.synchronizedList(new ArrayList<>());
 
         private ScraperProgress(String id, String baseUrl, int estimatedPages) {
             this.id = id;
@@ -345,13 +363,22 @@ public class ScrapingService {
         }
 
         String id() { return id; }
-        void resetForRun() { running = false; currentUrl = null; processedPages = 0; lastError = null; finishedAt = null; message = "Wartet auf nächsten Lauf"; }
+        void resetForRun() { running = false; currentUrl = null; processedPages = 0; lastError = null; finishedAt = null; failedLinks.clear(); message = "Wartet auf nächsten Lauf"; }
         void start() { running = true; startedAt = Instant.now(); message = "Scraper gestartet"; }
         void pageStarted(String url) { currentUrl = url; message = url == null ? "Seite wird geladen" : "Lade " + url; }
         void pageFinished() { processedPages++; }
         void error(String error) { lastError = error; message = "Fehler beim Verarbeiten der aktuellen Seite"; }
+        void failedLink(String url, String reason) {
+            if (url == null || url.isBlank()) return;
+            synchronized (failedLinks) {
+                if (failedLinks.stream().noneMatch(link -> link.url().equals(url))) {
+                    if (failedLinks.size() >= 1000) failedLinks.removeFirst();
+                    failedLinks.add(new HardwareAdminDtos.FailedScrape(url, reason, Instant.now()));
+                }
+            }
+        }
         void finish() { running = false; currentUrl = null; finishedAt = Instant.now(); message = lastError == null ? "Abgeschlossen" : "Mit Fehlern abgeschlossen"; }
-        HardwareAdminDtos.ScraperStatus snapshot() { return new HardwareAdminDtos.ScraperStatus(id, baseUrl, running, currentUrl, processedPages, estimatedPages, message, lastError, startedAt, finishedAt); }
+        HardwareAdminDtos.ScraperStatus snapshot() { synchronized (failedLinks) { return new HardwareAdminDtos.ScraperStatus(id, baseUrl, running, currentUrl, processedPages, estimatedPages, message, lastError, startedAt, finishedAt, List.copyOf(failedLinks)); } }
     }
 
     private <H extends HardwareSpec<H>> void callScrapeEvent(H hardwareSpec) {

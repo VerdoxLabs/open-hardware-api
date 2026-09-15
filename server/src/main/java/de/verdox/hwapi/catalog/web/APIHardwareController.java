@@ -155,6 +155,7 @@ public class APIHardwareController {
                 .filter(spec -> type == null || type.equalsIgnoreCase(spec.getClass().getSimpleName()))
                 .filter(spec -> needle.isBlank()
                         || spec.displayName().toLowerCase(Locale.ROOT).contains(needle)
+                        || (spec.getManufacturer() != null && spec.getManufacturer().toLowerCase(Locale.ROOT).contains(needle))
                         || spec.getMPNs().stream().anyMatch(mpn -> mpn.toLowerCase(Locale.ROOT).contains(needle))
                         || spec.getEANs().stream().anyMatch(ean -> ean.contains(needle)))
                 .limit(safeLimit)

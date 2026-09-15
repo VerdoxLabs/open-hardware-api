@@ -20,11 +20,13 @@ public class HardwareAPIAdminController {
     private final HardwareAdminService adminService;
     private final AwinAdminService awinAdminService;
     private final HardwareBackupService backupService;
+    private final CacheOverviewService cacheOverviewService;
 
-    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService, HardwareBackupService backupService) {
+    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService, HardwareBackupService backupService, CacheOverviewService cacheOverviewService) {
         this.adminService = adminService;
         this.awinAdminService = awinAdminService;
         this.backupService = backupService;
+        this.cacheOverviewService = cacheOverviewService;
     }
 
     /**
@@ -41,6 +43,11 @@ public class HardwareAPIAdminController {
     @GetMapping("/stats")
     public HardwareAdminDtos.BackendStats stats() {
         return adminService.getStats();
+    }
+
+    @GetMapping("/cache/overview")
+    public HardwareAdminDtos.CacheOverview cacheOverview() {
+        return cacheOverviewService.scan();
     }
 
     /**

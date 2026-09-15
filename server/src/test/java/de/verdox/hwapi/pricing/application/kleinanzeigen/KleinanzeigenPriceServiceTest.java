@@ -1,6 +1,7 @@
 package de.verdox.hwapi.pricing.application.kleinanzeigen;
 
 import de.verdox.hwapi.catalog.domain.values.Currency;
+import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.pricing.application.RemoteActiveListingWriterService;
 import de.verdox.hwapi.pricing.application.kleinanzeigen.KleinanzeigenPriceService.KleinanzeigenScrapeReport;
 import de.verdox.hwapi.pricing.sources.kleinanzeigen.KleinanzeigenAd;
@@ -38,13 +39,15 @@ class KleinanzeigenPriceServiceTest {
     private RemoteActiveListingWriterService listingWriter;
     @Mock
     private C2cMatchReviewRepository reviewRepository;
+    @Mock
+    private ScrapingEnabled scrapingEnabled;
 
     private KleinanzeigenPriceService service;
 
     @BeforeEach
     void setUp() {
         // Nach der @Mock-Injektion konstruieren – sonst wären die Felder noch null.
-        service = new KleinanzeigenPriceService(productRegistryService, listingWriter, reviewRepository);
+        service = new KleinanzeigenPriceService(productRegistryService, listingWriter, reviewRepository, scrapingEnabled);
     }
 
     private ProductRegistryService.AggregatedSearchResult aggregated(double score, Set<String> eans, Set<String> mpns) {
