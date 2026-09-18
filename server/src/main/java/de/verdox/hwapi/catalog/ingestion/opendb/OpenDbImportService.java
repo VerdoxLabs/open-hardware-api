@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.domain.*;
+import de.verdox.hwapi.catalog.ingestion.CatalogWriteCoordinator;
 import de.verdox.hwapi.catalog.domain.values.DimensionsMm;
 import de.verdox.hwapi.catalog.domain.values.FanSpec;
 import de.verdox.hwapi.pricing.application.RemoteActiveListingWriterService;
@@ -35,6 +36,7 @@ public class OpenDbImportService {
     private final OpenDbRepository repository;
     private final HardwareSpecService hardwareSpecService;
     private final RemoteActiveListingWriterService listingWriter;
+    private final CatalogWriteCoordinator writeCoordinator;
     private final ObjectMapper objectMapper;
     private final Path resultFile;
     private final AtomicBoolean running = new AtomicBoolean();
@@ -53,11 +55,12 @@ public class OpenDbImportService {
 
     public OpenDbImportService(OpenDbProperties properties, OpenDbRepository repository,
                                HardwareSpecService hardwareSpecService, RemoteActiveListingWriterService listingWriter,
-                               ObjectMapper objectMapper) {
+                               CatalogWriteCoordinator writeCoordinator, ObjectMapper objectMapper) {
         this.properties = properties;
         this.repository = repository;
         this.hardwareSpecService = hardwareSpecService;
         this.listingWriter = listingWriter;
+        this.writeCoordinator = writeCoordinator;
         this.objectMapper = objectMapper;
         this.resultFile = properties.checkoutDirectory().toAbsolutePath().normalize().getParent()
                 .resolve(".opendb-last-import.json");
@@ -70,11 +73,13 @@ public class OpenDbImportService {
         }
         startedAt.set(Instant.now());
         resetProgress();
+        writeCoordinator.beginOpenDbImport();
         try {
             ImportResult result = doImport();
             publishResult(result);
             return result;
         } finally {
+            writeCoordinator.endOpenDbImport();
             finishedAt.set(Instant.now());
             running.set(false);
         }
@@ -84,10 +89,12 @@ public class OpenDbImportService {
         if (!properties.enabled() || !running.compareAndSet(false, true)) return false;
         startedAt.set(Instant.now());
         resetProgress();
+        writeCoordinator.beginOpenDbImport();
         CompletableFuture.runAsync(() -> {
             try {
                 publishResult(doImport());
             } finally {
+                writeCoordinator.endOpenDbImport();
                 finishedAt.set(Instant.now());
                 running.set(false);
             }

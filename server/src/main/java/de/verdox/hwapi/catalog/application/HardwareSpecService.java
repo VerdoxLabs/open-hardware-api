@@ -325,7 +325,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
      */
     @Transactional(readOnly = true)
     public List<HardwareSpec<?>> findAll() {
-        return repoByType.values().stream()
+        List<HardwareSpec<?>> loaded = repoByType.values().stream()
                 .flatMap(repo -> {
                     List<HardwareSpec<?>> list = new ArrayList<>();
                     @SuppressWarnings("unchecked")
@@ -334,6 +334,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                     return list.stream();
                 })
                 .collect(Collectors.toList());
+        return loadWithSpecificGraphs(loaded);
     }
 
     /**
@@ -528,7 +529,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 continue;
             }
 
-            HardwareSpec<?> target = findTargetForIncoming(incoming, byEan, byMpn);
+            Set<HardwareSpec<?>> identifierMatches = findIdentifierCandidates(incoming, byEan, byMpn);
+            HardwareSpec<?> target = identifierMatches.stream().findFirst().orElse(null);
 
             if (target == null) {
                 target = incoming;
@@ -539,6 +541,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 toPersist.add(target);
                 indexKeys(target, byEan, byMpn);
             } else {
+                mergeExistingTargets(target, identifierMatches, targetsById, byEan, byMpn);
                 // Do not refresh detectedAt for an existing catalog entry.  The
                 // timestamp represents the first detection, not the last merge.
                 target.tryMerge(incoming);
@@ -667,23 +670,18 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
     }
 
-    private HardwareSpec<?> findTargetForIncoming(
+    private Set<HardwareSpec<?>> findIdentifierCandidates(
             HardwareSpec<?> incoming,
             Map<String, HardwareSpec<?>> byEan,
             Map<String, HardwareSpec<?>> byMpn
     ) {
-        HardwareSpec<?> anyMatch = null;
+        Set<HardwareSpec<?>> candidates = new LinkedHashSet<>();
 
         if (incoming.getEANs() != null) {
             for (String ean : incoming.getEANs()) {
                 if (ean == null) continue;
                 HardwareSpec<?> candidate = byEan.get(ean);
-                if (candidate != null) {
-                    if (candidate.getClass().equals(incoming.getClass())) {
-                        return candidate;
-                    }
-                    if (anyMatch == null) anyMatch = candidate;
-                }
+                if (candidate != null) candidates.add(candidate);
             }
         }
 
@@ -691,16 +689,29 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             for (String mpn : incoming.getMPNs()) {
                 if (mpn == null) continue;
                 HardwareSpec<?> candidate = byMpn.get(mpn);
-                if (candidate != null) {
-                    if (candidate.getClass().equals(incoming.getClass())) {
-                        return candidate;
-                    }
-                    if (anyMatch == null) anyMatch = candidate;
-                }
+                if (candidate != null) candidates.add(candidate);
             }
         }
 
-        return anyMatch != null && anyMatch.getClass().equals(incoming.getClass()) ? anyMatch : null;
+        return candidates;
+    }
+
+    private void mergeExistingTargets(
+            HardwareSpec<?> target,
+            Set<HardwareSpec<?>> candidates,
+            Map<Long, HardwareSpec<?>> targetsById,
+            Map<String, HardwareSpec<?>> byEan,
+            Map<String, HardwareSpec<?>> byMpn
+    ) {
+        for (HardwareSpec<?> other : candidates) {
+            if (other.getId() == target.getId()) continue;
+            target.tryMerge(other);
+            deleteWithBothRepos(other);
+            targetsById.remove(other.getId());
+            byEan.replaceAll((key, value) -> value.getId() == other.getId() ? target : value);
+            byMpn.replaceAll((key, value) -> value.getId() == other.getId() ? target : value);
+        }
+        indexKeys(target, byEan, byMpn);
     }
 
     private boolean hasCrossTypeIdentifierConflict(

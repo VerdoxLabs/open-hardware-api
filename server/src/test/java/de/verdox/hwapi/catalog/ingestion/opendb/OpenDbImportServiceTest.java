@@ -15,6 +15,7 @@ class OpenDbImportServiceTest {
             new OpenDbProperties(false, "", "main", Path.of("target/opendb-test"), null),
             mock(OpenDbRepository.class), mock(de.verdox.hwapi.catalog.application.HardwareSpecService.class),
             mock(de.verdox.hwapi.pricing.application.RemoteActiveListingWriterService.class),
+            mock(de.verdox.hwapi.catalog.ingestion.CatalogWriteCoordinator.class),
             new ObjectMapper());
 
     @Test

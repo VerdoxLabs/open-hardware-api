@@ -4,6 +4,7 @@ import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import de.verdox.hwapi.catalog.domain.values.Currency;
 import de.verdox.hwapi.catalog.ingestion.images.ProductImageStore;
+import de.verdox.hwapi.catalog.ingestion.CatalogWriteCoordinator;
 import de.verdox.hwapi.pricing.model.ListingEnums;
 import de.verdox.hwapi.pricing.model.ListingPricePoint;
 import de.verdox.hwapi.pricing.model.RemoteActiveListing;
@@ -30,6 +31,7 @@ public class RemoteActiveListingWriterService {
     private final RemoteActiveListingRepository listingRepository;
     private final ListingPricePointRepository priceRepository;
     private final HardwareSpecService hardwareSpecService;
+    private final CatalogWriteCoordinator writeCoordinator;
     private static final Logger LOGGER = Logger.getLogger(RemoteActiveListingWriterService.class.getName());
 
     private final Map<String, PendingLink> pendingLinks = new ConcurrentHashMap<>();
@@ -111,6 +113,7 @@ public class RemoteActiveListingWriterService {
     @Scheduled(fixedDelayString = "${hwapi.specLinkFlush.delayMs:1500}")
     @Transactional
     public void flushPendingSpecLinks() {
+        if (writeCoordinator.isOpenDbImportRunning()) return;
         if (pendingLinks.isEmpty()) return;
 
 
@@ -121,8 +124,10 @@ public class RemoteActiveListingWriterService {
         Set<String> eans = new HashSet<>();
         Set<String> mpns = new HashSet<>();
         for (PendingLink p : batch) {
-            if (p.ean != null) eans.add(p.ean);
-            if (p.mpn != null) mpns.add(p.mpn);
+            String ean = normalizeEanKey(p.ean);
+            String mpn = normalizeMpnKey(p.mpn);
+            if (ean != null) eans.add(ean);
+            if (mpn != null) mpns.add(mpn);
         }
         if (eans.isEmpty() && mpns.isEmpty()) return;
 
@@ -135,13 +140,13 @@ public class RemoteActiveListingWriterService {
         for (HardwareSpec<?> s : specs) {
             if (s.getEANs() != null) {
                 for (String e : s.getEANs()) {
-                    String ne = normalize(e);
+                    String ne = normalizeEanKey(e);
                     if (ne != null) byEan.putIfAbsent(ne, s);
                 }
             }
             if (s.getMPNs() != null) {
                 for (String m : s.getMPNs()) {
-                    String nm = normalize(m);
+                    String nm = normalizeMpnKey(m);
                     if (nm != null) byMpn.putIfAbsent(nm, s);
                 }
             }
@@ -151,20 +156,24 @@ public class RemoteActiveListingWriterService {
         Set<HardwareSpec<?>> changed = new HashSet<>();
         Set<String> attachedImages = new HashSet<>();
         for (PendingLink p : batch) {
-            if (p.mpn != null) {
-                HardwareSpec<?> s = byMpn.get(p.mpn);
+            String ean = normalizeEanKey(p.ean);
+            String mpn = normalizeMpnKey(p.mpn);
+            if (mpn != null) {
+                HardwareSpec<?> s = byMpn.get(mpn);
                 if (s != null) {
                     boolean dirty = false;
-                    if (p.ean != null && !s.getEANs().contains(p.ean)) { s.getEANs().add(p.ean); dirty = true; }
+                    HardwareSpec<?> eanOwner = ean == null ? null : byEan.get(ean);
+                    if (ean != null && (eanOwner == null || eanOwner.getId() == s.getId()) && !s.getEANs().contains(ean)) { s.getEANs().add(ean); dirty = true; }
                     if (p.img != null && attachedImages.add(s.getId() + "|" + p.img)) dirty |= ProductImageStore.storeExternal(p.img, s, p.sourcePage);
                     if (dirty) changed.add(s);
                 }
             }
-            if (p.ean != null) {
-                HardwareSpec<?> s = byEan.get(p.ean);
+            if (ean != null) {
+                HardwareSpec<?> s = byEan.get(ean);
                 if (s != null) {
                     boolean dirty = false;
-                    if (p.mpn != null && !s.getMPNs().contains(p.mpn)) { s.getMPNs().add(p.mpn); dirty = true; }
+                    HardwareSpec<?> mpnOwner = mpn == null ? null : byMpn.get(mpn);
+                    if (mpn != null && (mpnOwner == null || mpnOwner.getId() == s.getId()) && !s.getMPNs().contains(mpn)) { s.getMPNs().add(mpn); dirty = true; }
                     if (p.img != null && attachedImages.add(s.getId() + "|" + p.img)) dirty |= ProductImageStore.storeExternal(p.img, s, p.sourcePage);
                     if (dirty) changed.add(s);
                 }
@@ -234,6 +243,18 @@ public class RemoteActiveListingWriterService {
 
     private static String firstNonBlank(String first, String fallback) {
         return first == null || first.isBlank() ? fallback : first;
+    }
+
+    private static String normalizeEanKey(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = HardwareSpec.normalizeEan(value);
+        return normalized != null ? normalized : normalize(value);
+    }
+
+    private static String normalizeMpnKey(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = HardwareSpec.normalizeMpn(value);
+        return normalized != null ? normalized : normalize(value);
     }
 
     private static String normalize(String s) {
