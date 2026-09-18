@@ -29,6 +29,12 @@ sync:
     max-batch-size: 200
 
 hwapi:
+  pricing:
+    active-listings:
+      # Shared hourly cycle: eBay Browse API + Kleinanzeigen through Camoufox.
+      cron: ${HWAPI_ACTIVE_LISTINGS_CRON:0 20 * * * *}
+      # Protect the eBay Browse API quota; raise deliberately when quota allows it.
+      max-ebay-specs: ${HWAPI_ACTIVE_LISTINGS_MAX_EBAY_SPECS:250}
   scraping:
     # Set HWAPI_SCRAPING_ENABLED=false on a production server that receives
     # catalog/price imports from a separate local collector.
@@ -40,6 +46,12 @@ hwapi:
       api-key: ${WEBSCRAPER_API_KEY:dev-key-change-me}
       engine: ${WEBSCRAPER_ENGINE:auto}
       timeout: ${WEBSCRAPER_TIMEOUT:120s}
+  opendb:
+    enabled: ${HWAPI_OPENDB_ENABLED:true}
+    repository: ${HWAPI_OPENDB_REPOSITORY:https://github.com/buildcores/buildcores-open-db.git}
+    branch: ${HWAPI_OPENDB_BRANCH:main}
+    checkout-directory: ${HWAPI_OPENDB_CHECKOUT_DIR:buildcores-open-db-main}
+    schema-directory: ${HWAPI_OPENDB_SCHEMA_DIR:schemas}
 
 spring.jpa.properties.hibernate.default_batch_fetch_size: 64
 

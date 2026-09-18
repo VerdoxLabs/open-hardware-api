@@ -1,6 +1,7 @@
 package de.verdox.hwapi.catalog.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.Collection;
 
 @RestController
 @RequiredArgsConstructor
@@ -177,7 +179,8 @@ public class APIHardwareController {
             @RequestParam(defaultValue = "false") boolean withImage,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
-            @RequestParam(defaultValue = "name") String sort
+            @RequestParam(defaultValue = "name") String sort,
+            @RequestParam Map<String, String> parameters
     ) {
         String needle = q.trim().toLowerCase(Locale.ROOT);
         String maker = manufacturer.trim().toLowerCase(Locale.ROOT);
@@ -194,12 +197,17 @@ public class APIHardwareController {
                 .filter(spec -> needle.isBlank()
                         || spec.displayName().toLowerCase(Locale.ROOT).contains(needle)
                         || spec.getMPNs().stream().anyMatch(value -> value.toLowerCase(Locale.ROOT).contains(needle))
-                        || spec.getEANs().stream().anyMatch(value -> value.contains(needle)));
+                        || spec.getEANs().stream().anyMatch(value -> value.contains(needle)))
+                .filter(spec -> matchesSpecFilters(spec, parameters));
 
         Comparator<HardwareSpec<?>> comparator = Comparator.comparing(
                 spec -> spec.displayName() == null ? "" : spec.displayName(), String.CASE_INSENSITIVE_ORDER);
         if ("id".equalsIgnoreCase(sort)) {
             comparator = Comparator.comparingLong((HardwareSpec<?> spec) -> spec.getId()).reversed();
+        } else if ("detectedAt".equalsIgnoreCase(sort)) {
+            comparator = Comparator.comparing((HardwareSpec<?> spec) -> spec.getDetectedAt(),
+                    Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(Comparator.comparingLong((HardwareSpec<?> spec) -> spec.getId()).reversed());
         }
         List<Map<String, Object>> all = matches.sorted(comparator)
                 .map(spec -> {
@@ -211,6 +219,69 @@ public class APIHardwareController {
         int from = Math.min(safePage * safeSize, all.size());
         int to = Math.min(from + safeSize, all.size());
         return new PageImpl<>(all.subList(from, to), org.springframework.data.domain.PageRequest.of(safePage, safeSize), all.size());
+    }
+
+    /**
+     * Facets deliberately use the JSON representation of a spec.  This keeps the
+     * catalog filter contract aligned with the entity model and also supports the
+     * lossless {@code CatalogAccessory.specifications} map without a new endpoint
+     * per accessory class.  Clients only request the fields they render.
+     */
+    @GetMapping("/filter-options")
+    @Transactional(readOnly = true)
+    public Map<String, List<String>> filterOptions(
+            @RequestParam String type,
+            @RequestParam List<String> fields
+    ) {
+        if (!hardwareSpecService.isValidType(type)) throw new IllegalArgumentException("Invalid type: " + type);
+        return fields.stream().distinct().collect(java.util.stream.Collectors.toMap(
+                field -> field,
+                field -> hardwareSpecService.findAll().stream()
+                        .filter(spec -> type.equalsIgnoreCase(spec.getClass().getSimpleName()))
+                        .flatMap(spec -> valuesAt(spec, field).stream())
+                        .filter(value -> !value.isBlank() && !"UNKNOWN".equalsIgnoreCase(value) && !"0".equals(value))
+                        .distinct().sorted(String.CASE_INSENSITIVE_ORDER).limit(100).toList(),
+                (left, right) -> left,
+                LinkedHashMap::new
+        ));
+    }
+
+    /** `filter.<field>=value` is exact/set membership; `min.` and `max.` compare numbers. */
+    private boolean matchesSpecFilters(HardwareSpec<?> spec, Map<String, String> parameters) {
+        return parameters.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith("filter.") || entry.getKey().startsWith("min.") || entry.getKey().startsWith("max."))
+                .allMatch(entry -> {
+                    String key = entry.getKey();
+                    String field = key.substring(key.indexOf('.') + 1);
+                    List<String> values = valuesAt(spec, field);
+                    if (values.isEmpty()) return false;
+                    if (key.startsWith("filter.")) {
+                        return values.stream().anyMatch(value -> value.equalsIgnoreCase(entry.getValue()));
+                    }
+                    try {
+                        double threshold = Double.parseDouble(entry.getValue());
+                        return values.stream().mapToDouble(value -> {
+                                    try { return Double.parseDouble(value); } catch (NumberFormatException ignored) { return Double.NaN; }
+                                })
+                                .anyMatch(value -> key.startsWith("min.") ? value >= threshold : value <= threshold);
+                    } catch (NumberFormatException ignored) {
+                        return false;
+                    }
+                });
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> valuesAt(HardwareSpec<?> spec, String path) {
+        Map<String, Object> document = objectMapper.convertValue(spec, new TypeReference<>() {});
+        Object value = document;
+        for (String segment : path.split("\\.")) {
+            if (!(value instanceof Map<?, ?> map)) return List.of();
+            value = ((Map<String, Object>) map).get(segment);
+        }
+        if (value == null) return List.of();
+        if (value instanceof Collection<?> collection) return collection.stream().filter(Objects::nonNull).map(String::valueOf).toList();
+        if (value instanceof Map<?, ?> map) return map.values().stream().filter(Objects::nonNull).map(String::valueOf).toList();
+        return List.of(String.valueOf(value));
     }
 
     @GetMapping("/page/{type}/{filter}")

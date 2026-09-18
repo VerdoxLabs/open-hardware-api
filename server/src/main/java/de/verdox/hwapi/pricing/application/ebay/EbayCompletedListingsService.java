@@ -12,6 +12,7 @@ import de.verdox.hwapi.pricing.application.PricePointSyncService;
 import de.verdox.hwapi.pricing.sources.ebay.EbayScraper;
 import de.verdox.hwapi.pricing.sources.ebay.EbayListingDetails;
 import de.verdox.hwapi.pricing.sources.ebay.EbaySoldItem;
+import de.verdox.hwapi.pricing.application.kleinanzeigen.KleinanzeigenPriceService;
 import de.verdox.hwapi.integration.client.ebay.EbayCategory;
 import de.verdox.hwapi.integration.client.ebay.EbayMarketplace;
 import de.verdox.hwapi.pricing.model.RemoteSoldItem;
@@ -93,6 +94,7 @@ public class EbayCompletedListingsService {
     private final EbayScraper ebayInstant = new EbayScraper("instant_service");
     private final HardwareSpecService hardwareSpecService;
     private final ScrapingEnabled scrapingEnabled;
+    private final KleinanzeigenPriceService kleinanzeigenPriceService;
     private final Map<String, CompletableFuture<Void>> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executorService = Executors.newFixedThreadPool(4);
     private final BlockingQueue<UUID> ebayLookupQueue = new LinkedBlockingQueue<>();
@@ -127,13 +129,14 @@ public class EbayCompletedListingsService {
     private record EbayMatch(EbayMatchStatus status, String matchedEan, String matchedMpn, String reason) {}
     private static final Set<String> BUNDLE_TERMS = Set.of("bundle", "combo", "set", "komplett pc", "gaming pc", "desktop pc", "laptop", "notebook", "mainboard", "motherboard", "kuehler", "kühler", "cooler", "heatsink", "box only", "verpackung");
 
-    public EbayCompletedListingsService(EbayAPITrackActiveListingsService ebayAPITrackActiveListingsService, PriceLookupBlockRepository priceLookupBlockRepository, RemoteSoldItemRepository repo, PricePointSyncService pricePointSyncService, HardwareSpecService hardwareSpecService, ScrapingEnabled scrapingEnabled) {
+    public EbayCompletedListingsService(EbayAPITrackActiveListingsService ebayAPITrackActiveListingsService, PriceLookupBlockRepository priceLookupBlockRepository, RemoteSoldItemRepository repo, PricePointSyncService pricePointSyncService, HardwareSpecService hardwareSpecService, ScrapingEnabled scrapingEnabled, KleinanzeigenPriceService kleinanzeigenPriceService) {
         this.ebayAPITrackActiveListingsService = ebayAPITrackActiveListingsService;
         this.priceLookupBlockRepository = priceLookupBlockRepository;
         this.repo = repo;
         this.pricePointSyncService = pricePointSyncService;
         this.hardwareSpecService = hardwareSpecService;
         this.scrapingEnabled = scrapingEnabled;
+        this.kleinanzeigenPriceService = kleinanzeigenPriceService;
     }
 
     // --------------------------
@@ -233,7 +236,7 @@ public class EbayCompletedListingsService {
     public EbayLookupJobResponse getEbayLookupJob(UUID jobId) {
         EbayLookupJob job = ebayLookupJobs.get(jobId);
         if (job == null) return null;
-        return new EbayLookupJobResponse(job.id, job.identifier, job.status, EbayMarketplace.values().length,
+        return new EbayLookupJobResponse(job.id, job.identifier, job.status, EbayMarketplace.values().length + 1,
                 job.completedRegions, job.currentRegion, List.copyOf(job.results), job.error);
     }
 
@@ -256,19 +259,28 @@ public class EbayCompletedListingsService {
         EbayLookupJob job = ebayLookupJobs.get(jobId);
         if (job == null) return;
         job.status = "RUNNING";
+        HardwareSpec<?> spec = hardwareSpecService.findByEANOrMPN(job.identifier);
         for (EbayMarketplace marketplace : EbayMarketplace.values()) {
             job.currentRegion = marketplace.name();
             try {
-                Set<RemoteSoldItem> found = fetchDataFromEbay(ebayInstant, marketplace, job.identifier);
-                int verified = (int) found.stream().filter(item -> item.getEbayMatchStatus() == EbayMatchStatus.VERIFIED).count();
-                int likely = (int) found.stream().filter(item -> item.getEbayMatchStatus() == EbayMatchStatus.HIGH_CONFIDENCE).count();
-                int rejected = (int) found.stream().filter(item -> item.getEbayMatchStatus() == EbayMatchStatus.REJECTED).count();
-                job.results.add(new EbayRegionResult(marketplace.name(), marketplace.getDomain(), "COMPLETED", found.size(), verified, likely, rejected, null));
+                int found = spec == null ? 0 : ebayAPITrackActiveListingsService
+                        .fetchActiveListingsForSpec(spec, Set.of(marketplace.getCurrency()), marketplace)
+                        .values().stream().mapToInt(List::size).sum();
+                job.results.add(new EbayRegionResult(marketplace.name(), marketplace.getDomain(), "COMPLETED", found, found, 0, 0, null));
             } catch (Throwable e) {
                 job.results.add(new EbayRegionResult(marketplace.name(), marketplace.getDomain(), "FAILED", 0, 0, 0, 0, e.getMessage()));
             }
             job.completedRegions++;
         }
+        try {
+            String query = spec == null ? job.identifier : (spec.getManufacturer() + " " + spec.getModel()).trim();
+            var ka = kleinanzeigenPriceService.lookup(query);
+            job.results.add(new EbayRegionResult("KLEINANZEIGEN", "kleinanzeigen.de", "COMPLETED",
+                    ka.total(), ka.tier1(), ka.tier2() + ka.tier3(), 0, null));
+        } catch (Throwable e) {
+            job.results.add(new EbayRegionResult("KLEINANZEIGEN", "kleinanzeigen.de", "FAILED", 0, 0, 0, 0, e.getMessage()));
+        }
+        job.completedRegions++;
         job.currentRegion = null;
         job.status = "COMPLETED";
         activeEbayLookupsByIdentifier.remove(job.identifier, jobId);

@@ -77,6 +77,10 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     @Setter
     private Duration minLiveRequestInterval = Duration.ZERO;
 
+    public Duration getMinLiveRequestInterval() {
+        return minLiveRequestInterval;
+    }
+
     public SeleniumBasedWebScraper(String id, ScrapingCache cache,
                                    CookieJar cookieJar,
                                    BiPredicate<String, Document> isChallengePage,
@@ -177,8 +181,20 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         String canonUrl = ScrapingPaths.urlCanonical(url);
         PageKey key = new PageKey(domain, id, canonUrl);
 
-        // 1) Cache lesen – roh und geprüft
+        // 1) Cache lesen und vor jeder Verwendung validieren.  A challenge response
+        // must never become the stale fallback after a later upstream failure.
         Optional<String> cachedRaw = cache.loadHtml(key);
+        if (cachedRaw.isPresent()) {
+            Document cachedDocument = Jsoup.parse(cachedRaw.get(), baseUri(domain));
+            boolean isChallenge = isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument);
+            boolean isSaveable = shouldSavePage == null || shouldSavePage.test(canonUrl, cachedDocument);
+            if (isChallenge || !isSaveable) {
+                deleteCached(key);
+                cachedRaw = Optional.empty();
+                ScrapingService.LOGGER.log(Level.INFO,
+                        "Discarded invalid cached page for: " + canonUrl + (isChallenge ? " (challenge)" : " (not saveable)"));
+            }
+        }
 
         Optional<String> cachedFresh = cachedRaw.flatMap(html ->
                 isFreshEnough(key, fetchOptions.getTtl()) ? Optional.of(html) : Optional.empty()
@@ -190,18 +206,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         if (cachedFresh.isPresent()) {
             Document cachedDocument = Jsoup.parse(cachedFresh.get(), baseUri(domain));
 
-            if (isChallengePage != null && isChallengePage.test(canonUrl, cachedDocument)) {
-                ScrapingService.LOGGER.log(Level.FINE,
-                        "Cached page is a challenge page, ignoring but KEEPING cache: " + canonUrl);
-            }
-            else if (shouldSavePage != null && !shouldSavePage.test(canonUrl, cachedDocument)) {
-                ScrapingService.LOGGER.log(Level.FINE,
-                        "Cached page should not be used (cookie/login), ignoring but KEEPING cache: " + canonUrl);
-            }
-            else {
-                // Cache ist gut → direkt zurück
-                return cachedDocument;
-            }
+            return cachedDocument;
         }
 
         // 1b) Nur Cache-Modus
@@ -229,8 +234,6 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             return Document.createShell(url);
         }
 
-        waitForLiveRequestSlot(domain);
-
         // 2) Live-Laden – Headless oder Selenium – mit Fallback
         Document doc;
         String html;
@@ -239,12 +242,20 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             try {
                 ScrapingService.LOGGER.log(Level.FINE,
                         "Cache miss → WEBSCRAPER API fetch: " + canonUrl + " [" + domain + ":" + id + "]");
-                html = webScraperApiClient.fetchHtml(canonUrl);
+                try (DomainRateLimiter.Permit ignored = DomainRateLimiter.acquire(domain, minLiveRequestInterval)) {
+                    html = webScraperApiClient.fetchHtml(canonUrl);
+                }
                 html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
                 doc = Jsoup.parse(html, baseUri(domain));
             } catch (RuntimeException ex) {
                 ScrapingService.LOGGER.log(Level.WARNING,
                         "Webscraper API fetch failed for " + canonUrl + " – using stale cache (if any)", ex);
+                if (isRateLimited(ex)) {
+                    // The Webscraper API wraps source-side 403/429 responses in a 502.
+                    // Stop the complete domain queue immediately instead of consuming the
+                    // remaining pagination and detail URLs one at a time.
+                    DomainRateLimiter.pause(domain, Duration.ofHours(2));
+                }
                 if (isOfflineException(ex)) {
                     markDomainOffline(domain);
                 }
@@ -258,7 +269,9 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             try {
                 ScrapingService.LOGGER.log(Level.FINE,
                         "Cache miss → HEADLESS fetch: " + canonUrl + " [" + domain + ":" + id + "]");
-                doc = fetchHeadless(canonUrl);
+                try (DomainRateLimiter.Permit ignored = DomainRateLimiter.acquire(domain, minLiveRequestInterval)) {
+                    doc = fetchHeadless(canonUrl);
+                }
                 html = doc.html();
             } catch (IOException e) {
                 // Headless fehlgeschlagen → einmalig in normalen Selenium-Flow wechseln
@@ -270,7 +283,9 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
                     "Cache miss → SELENIUM fetch: " + canonUrl + " [" + domain + ":" + id + "]");
 
             try {
-                html = fetchWithSelenium(canonUrl, fetchOptions);
+                try (DomainRateLimiter.Permit ignored = DomainRateLimiter.acquire(domain, minLiveRequestInterval)) {
+                    html = fetchWithSelenium(canonUrl, fetchOptions);
+                }
                 html = HtmlSlimmer.slimHtml(html, canonUrl, new HtmlSlimmer.Options());
                 doc = Jsoup.parse(html, baseUri(domain));
             }
@@ -538,10 +553,6 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
         }
     }
 
-    private void waitForLiveRequestSlot(String domain) {
-        DomainRateLimiter.await(domain, minLiveRequestInterval);
-    }
-
     /**
      * Pfad der Cache-Datei (zentral, falls sich die Logik in ScrapingPaths mal ändert).
      */
@@ -555,6 +566,7 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
     private void deleteCached(PageKey key) {
         try {
             Files.deleteIfExists(fileFor(key));
+            Files.deleteIfExists(fileFor(key).resolveSibling(fileFor(key).getFileName() + ".gz"));
         } catch (Exception ignored) {
         }
     }
@@ -635,7 +647,12 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
      */
     private boolean isOfflineException(Throwable ex) {
         if (ex instanceof WebScraperApiClient.WebScraperApiException) {
-            return true;
+            // A response from the scraper service, including a wrapped 502, can contain
+            // a source-page failure (Pc-Kombo returns 500 for individual stale products).
+            // It is therefore not proof that the entire source is unreachable. Only a
+            // transport failure without an HTTP response opens the domain circuit breaker.
+            Integer status = ((WebScraperApiClient.WebScraperApiException) ex).statusCode();
+            return status == null;
         }
         if (ex instanceof org.openqa.selenium.TimeoutException) {
             return true;
@@ -645,5 +662,19 @@ public class SeleniumBasedWebScraper implements BasicWebScraper {
             return true;
         }
         return false;
+    }
+
+    private boolean isRateLimited(Throwable ex) {
+        if (!(ex instanceof WebScraperApiClient.WebScraperApiException scrapeException)) {
+            return false;
+        }
+        Integer status = scrapeException.statusCode();
+        if (status != null && status == 429) {
+            return true;
+        }
+        // Source-side errors are represented as a 502 by the Webscraper API. Its
+        // diagnostic body is deliberately included in the exception message.
+        String message = scrapeException.getMessage();
+        return message != null && (message.contains("HTTP 403 scraping") || message.contains("HTTP 429 scraping"));
     }
 }

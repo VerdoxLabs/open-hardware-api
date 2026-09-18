@@ -65,13 +65,15 @@ final class PCPartPickerImageStore {
 
             // cdna.pcpartpicker.com is part of the same provider. Keep image downloads
             // inside the exact same 60-second request budget as HTML pages.
-            DomainRateLimiter.await("pcpartpicker.com", Duration.ofSeconds(60));
-            HttpResponse<byte[]> response = HTTP.send(HttpRequest.newBuilder(uri)
-                            .timeout(Duration.ofSeconds(30))
-                            .header("User-Agent", "PC-Flipping catalog image cache")
-                            .GET()
-                            .build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response;
+            try (DomainRateLimiter.Permit ignored = DomainRateLimiter.acquire("pcpartpicker.com", Duration.ofSeconds(60))) {
+                response = HTTP.send(HttpRequest.newBuilder(uri)
+                                .timeout(Duration.ofSeconds(30))
+                                .header("User-Agent", "PC-Flipping catalog image cache")
+                                .GET()
+                                .build(),
+                        HttpResponse.BodyHandlers.ofByteArray());
+            }
             String contentType = response.headers().firstValue("Content-Type").orElse("");
             if (response.statusCode() != 200 || !contentType.toLowerCase(Locale.ROOT).startsWith("image/")
                     || response.body().length == 0 || response.body().length > 15 * 1024 * 1024) {

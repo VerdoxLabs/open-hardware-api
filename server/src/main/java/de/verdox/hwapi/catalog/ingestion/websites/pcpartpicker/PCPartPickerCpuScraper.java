@@ -24,10 +24,10 @@ public final class PCPartPickerCpuScraper {
         return new WebsiteScraper(service, "pcpartpicker.com")
                 .withStrategy(new PCPartPickerStrategy())
                 .withMinLiveRequestInterval(Duration.ofSeconds(60))
+                .withChallengePageDetection(PCPartPickerScrapers::isRateLimitPage)
                 .withShouldSavePredicate(PCPartPickerCpuScraper::isUsableCatalogSnapshot)
-                .withCPUScrape("PCPartPicker/CPU", cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
+                .withCPUScrape("CPU", cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
                             applySpecs(scraped.specs(), target);
-                            PCPartPickerImageStore.storeFirstProductImage(scraped.specs(), target);
                         }, CATALOG_URL));
     }
 

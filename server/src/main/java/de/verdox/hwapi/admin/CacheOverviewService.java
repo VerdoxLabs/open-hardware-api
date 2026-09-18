@@ -64,7 +64,7 @@ public class CacheOverviewService {
                         Document document = parse(file);
                         if (isCatalog(document)) {
                             catalogs++;
-                            recognizedProducts.addAll(document.select("td.td__name a[href*='/product/']").stream()
+                            recognizedProducts.addAll(catalogProductLinks(document).stream()
                                     .map(element -> element.absUrl("href").isBlank() ? element.attr("href") : element.absUrl("href"))
                                     .filter(url -> !url.isBlank()).toList());
                         } else if (isDetail(document)) {
@@ -98,11 +98,20 @@ public class CacheOverviewService {
     private boolean isCatalog(Document document) {
         return !document.select("table.productList--detailed").isEmpty()
                 || !document.select("#category_content tr.tr__product").isEmpty()
-                || document.title().toLowerCase().startsWith("choose ");
+                || document.title().toLowerCase().startsWith("choose ")
+                || (!document.select("ul.pagination").isEmpty()
+                    && !document.select("div.card.h-100 a.title[href]").isEmpty());
+    }
+
+    private List<org.jsoup.nodes.Element> catalogProductLinks(Document document) {
+        return document.select("td.td__name a[href*='/product/'], div.card.h-100 a.title[href]");
     }
 
     private boolean isDetail(Document document) {
         return !document.select("div.group.group--spec").isEmpty()
+                // pc-kombo uses cards under #product/#specs instead of the
+                // group--spec markup used by PCPartPicker.
+                || !document.select("#product #specs").isEmpty()
                 || !document.select("meta[property=og:title]").isEmpty();
     }
 }

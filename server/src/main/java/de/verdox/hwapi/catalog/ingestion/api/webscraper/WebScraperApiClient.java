@@ -2,6 +2,7 @@ package de.verdox.hwapi.catalog.ingestion.api.webscraper;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -33,13 +34,18 @@ public final class WebScraperApiClient {
 
     public String fetchHtml(String url) {
         try {
-            boolean pcPartPickerCatalog = isPcPartPickerCatalog(url);
-            boolean akamaiProtectedSite = isEbay(url);
+            String requestUrl = normalizeUrl(url);
+            boolean pcPartPickerCatalog = isPcPartPickerCatalog(requestUrl);
+            boolean akamaiProtectedSite = isEbay(requestUrl);
+            boolean kleinanzeigenSite = isKleinanzeigen(requestUrl);
             ObjectNode body = objectMapper.createObjectNode()
-                    .put("url", url)
+                    .put("url", requestUrl)
                     // PCPartPicker's catalog rows are populated after the initial
                     // document response; a static/auto shell has an empty tbody.
-                    .put("engine", pcPartPickerCatalog ? "js" : akamaiProtectedSite ? "akamai" : engine);
+                    // Kleinanzeigen returns HTTP 500 to the static client. Force the real
+                    // browser path so the configured Camoufox websocket is used directly.
+                    .put("engine", pcPartPickerCatalog ? "js" : akamaiProtectedSite ? "akamai" :
+                    kleinanzeigenSite ? "cloudflare" : engine);
             if (pcPartPickerCatalog) {
                 body.put("waitForSelector", "#category_content tr.tr__product");
             }
@@ -63,7 +69,7 @@ public final class WebScraperApiClient {
                 if (responseBody.length() > 500) {
                     responseBody = responseBody.substring(0, 500);
                 }
-                throw new WebScraperApiException("Webscraper API returned HTTP "
+                throw new WebScraperApiException(response.statusCode(), "Webscraper API returned HTTP "
                         + response.statusCode() + ": " + responseBody);
             }
             return response.body();
@@ -77,11 +83,44 @@ public final class WebScraperApiClient {
         }
     }
 
+    /**
+     * Catalog scrapers can return product names as part of the href. Those hrefs
+     * occasionally contain spaces or Unicode characters, while the downstream
+     * scraper expects a valid URL. Encode the URL once at the API boundary.
+     */
+    private static String normalizeUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        try {
+            // UriComponentsBuilder knows URL component boundaries, unlike
+            // URLEncoder (which is only for form/query values). It preserves an
+            // existing scheme, path delimiters and percent escapes while encoding
+            // unsafe product-title characters such as spaces, pipes and Unicode.
+            return UriComponentsBuilder.fromUriString(url).build().encode().toUriString();
+        } catch (IllegalArgumentException ignored) {
+            // Preserve the original value so the API error still contains the
+            // source URL when a scraper returns a malformed href.
+            return url;
+        }
+    }
+
     private static boolean isPcPartPickerCatalog(String url) {
         try {
             URI uri = URI.create(url);
             return uri.getHost() != null && uri.getHost().endsWith("pcpartpicker.com")
                     && uri.getPath().startsWith("/products/");
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isKleinanzeigen(String url) {
+        try {
+            URI uri = URI.create(url);
+            String host = uri.getHost();
+            return host != null && (host.equalsIgnoreCase("kleinanzeigen.de")
+                    || host.endsWith(".kleinanzeigen.de"));
         } catch (IllegalArgumentException ignored) {
             return false;
         }
@@ -125,12 +164,26 @@ public final class WebScraperApiClient {
     }
 
     public static class WebScraperApiException extends RuntimeException {
+        private final Integer statusCode;
+
         public WebScraperApiException(String message) {
             super(message);
+            this.statusCode = null;
+        }
+
+        public WebScraperApiException(int statusCode, String message) {
+            super(message);
+            this.statusCode = statusCode;
         }
 
         public WebScraperApiException(String message, Throwable cause) {
             super(message, cause);
+            this.statusCode = null;
+        }
+
+        /** HTTP status returned by the scraper service, if a response was received. */
+        public Integer statusCode() {
+            return statusCode;
         }
     }
 }

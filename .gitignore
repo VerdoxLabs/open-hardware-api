@@ -34,3 +34,5 @@ build/
 /open-hardware-api/
 # Local HTML fixtures and downloaded browser resources; never commit scraped source data.
 /scrape/
+/buildcores-open-db-main/
+/data/buildcores-open-db/

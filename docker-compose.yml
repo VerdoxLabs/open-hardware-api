@@ -44,6 +44,46 @@ services:
       retries: 20
       start_period: 20s
 
+  # Add a service plus its websocket URL to CAMOUFOX_WS_ENDPOINTS to scale the browser pool.
+  webscraper-camoufox-2:
+    build:
+      context: ../web-scraper-api/camoufox
+      dockerfile: Dockerfile
+    image: webscraper-camoufox:local
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',1234),2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  webscraper-camoufox-3:
+    build:
+      context: ../web-scraper-api/camoufox
+      dockerfile: Dockerfile
+    image: webscraper-camoufox:local
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',1234),2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  webscraper-camoufox-4:
+    build:
+      context: ../web-scraper-api/camoufox
+      dockerfile: Dockerfile
+    image: webscraper-camoufox:local
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',1234),2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
   webscraper-api:
     build:
       context: ../web-scraper-api
@@ -52,6 +92,14 @@ services:
     depends_on:
       webscraper-db:
         condition: service_healthy
+      webscraper-camoufox:
+        condition: service_healthy
+      webscraper-camoufox-2:
+        condition: service_healthy
+      webscraper-camoufox-3:
+        condition: service_healthy
+      webscraper-camoufox-4:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: local
       DB_URL: jdbc:postgresql://webscraper-db:5432/webscraper
@@ -59,7 +107,7 @@ services:
       DB_PASSWORD: postgres
       API_KEYS: ${WEBSCRAPER_API_KEY:-dev-key-change-me}
       EXPORT_DIR: /app/exports
-      CAMOUFOX_WS_ENDPOINT: ws://webscraper-camoufox:1234/camoufox
+      CAMOUFOX_WS_ENDPOINTS: ws://webscraper-camoufox:1234/camoufox,ws://webscraper-camoufox-2:1234/camoufox,ws://webscraper-camoufox-3:1234/camoufox,ws://webscraper-camoufox-4:1234/camoufox
     ports:
       - "8090:8080"
     shm_size: "512mb"

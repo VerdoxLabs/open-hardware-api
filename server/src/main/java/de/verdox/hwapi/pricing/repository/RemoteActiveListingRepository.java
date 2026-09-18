@@ -12,4 +12,6 @@ public interface RemoteActiveListingRepository extends JpaRepository<RemoteActiv
             String marketPlaceDomain,
             String marketPlaceItemID
     );
+
+    List<RemoteActiveListing> findAllByMerchantImageUrlIsNotNull();
 }

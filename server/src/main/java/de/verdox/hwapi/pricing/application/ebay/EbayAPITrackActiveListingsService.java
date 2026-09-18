@@ -14,7 +14,6 @@ import de.verdox.hwapi.pricing.application.RemoteActiveListingWriterService;
 import de.verdox.hwapi.pricing.config.EbayAPIConfig;
 import de.verdox.hwapi.pricing.model.RemoteActiveListing;
 import jakarta.annotation.Nullable;
-import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +23,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 @Service
-@Component
 public class EbayAPITrackActiveListingsService {
 
     private static final Logger LOGGER = Logger.getLogger(EbayAPITrackActiveListingsService.class.getSimpleName());
@@ -120,7 +118,8 @@ public class EbayAPITrackActiveListingsService {
                     .builder(marketplace)
                     .limit(200)
                     .sellerType(EbayBrowseSearchRequest.SellerType.INDIVIDUAL)
-                    .buyingOptions(EbayBrowseSearchRequest.BuyingOption.FIXED_PRICE)
+                    .buyingOptions(EbayBrowseSearchRequest.BuyingOption.FIXED_PRICE,
+                            EbayBrowseSearchRequest.BuyingOption.AUCTION)
                     .category(ebayCategory);
 
             if (ean != null) builder = builder.gtin(ean);

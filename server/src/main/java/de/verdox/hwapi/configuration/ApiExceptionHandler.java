@@ -18,6 +18,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
@@ -31,6 +32,12 @@ import java.util.Optional;
 public class ApiExceptionHandler {
 
     private static final URI DEFAULT_TYPE = URI.create("about:blank");
+
+    /** A client closing an SSE/long-poll connection is normal and cannot receive an error body. */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void clientDisconnected(AsyncRequestNotUsableException ex) {
+        LoggerFactory.getLogger(getClass()).debug("Client disconnected while writing an async response: {}", ex.getMessage());
+    }
 
     private ProblemDetail pd(HttpStatus status, String title, String detail, HttpServletRequest req) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(status, detail);

@@ -18,7 +18,7 @@ public class PCKomboScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "pc-kombo.com")
                 .withStrategy(new PCKomboStrategy())
-                .withMinLiveRequestInterval(Duration.ofSeconds(10))
+                .withMinLiveRequestInterval(Duration.ofSeconds(3))
 
                 .withCPUScrape(cpu -> cpu.addMainScrapeLogic((scraped, target) -> {
                             var specs = scraped.specs();
@@ -53,7 +53,8 @@ public class PCKomboScrapers {
                             target.setIntegratedSpeakers(parseBoolean("Speakers", specs));
                             target.setCurved(parseBoolean("Curved", specs));
                             target.setAdjustableSize(parseBoolean("Adjustable Height", specs));
-                        })
+                        },
+                        "https://www.pc-kombo.com/us/components/displays")
                 )
 
                 .withMotherboardScrape(mb -> mb.addMainScrapeLogic((scraped, target) -> {

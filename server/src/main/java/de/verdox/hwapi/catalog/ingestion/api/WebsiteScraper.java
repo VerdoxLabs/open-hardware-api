@@ -2,6 +2,7 @@ package de.verdox.hwapi.catalog.ingestion.api;
 
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.ingestion.ScrapingService;
+import de.verdox.hwapi.catalog.ingestion.images.ProductImageStore;
 import de.verdox.hwapi.catalog.domain.*;
 import lombok.Getter;
 import org.jsoup.nodes.Document;
@@ -205,7 +206,10 @@ public class WebsiteScraper {
         public Set<WebsiteCatalogScraper<HARDWARE>> build() {
             Set<WebsiteCatalogScraper<HARDWARE>> set = new HashSet<>();
 
-            if (mainEntry != null) {
+            // A main entry may deliberately only provide shared parsing logic for variants
+            // (for example Pc-Kombo storage: SSD and HDD have separate catalogs).  Do not
+            // create an otherwise guaranteed-to-fail scraper with no catalog URL.
+            if (mainEntry != null && mainEntry.urls().length > 0) {
                 var main = new WebsiteCatalogScraper<HARDWARE>(domain, mainEntry.subId, mainEntry.urls) {
                     @Override
                     public String baseURL() {
@@ -226,6 +230,7 @@ public class WebsiteScraper {
                         try {
                             HARDWARE hw = extractHardware(scrapedSpecs);
                             mainEntry.scrapeLogic().accept(scrapedSpecs, hw);
+                            ProductImageStore.store(scrapedSpecs, hw);
 
                             if (service.sanitizeBeforeSave(hw)) {
                                 onScrape.onScrape(hw);
@@ -268,6 +273,7 @@ public class WebsiteScraper {
                             HARDWARE hw = extractHardware(scrapedSpecs);
                             mainEntry.scrapeLogic().accept(scrapedSpecs, hw);
                             entry.scrapeLogic().accept(scrapedSpecs, hw);
+                            ProductImageStore.store(scrapedSpecs, hw);
                             if (service.sanitizeBeforeSave(hw)) {
                                 onScrape.onScrape(hw);
                                 return Optional.of(hw);

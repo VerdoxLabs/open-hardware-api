@@ -92,9 +92,8 @@ public class KleinanzeigenPriceService {
      * oder bei Bot-Challenge liefert der Scraper (halb) leere Listen und der Run
      * endet mit leerem Report – kein harter Fehler.
      */
-    @Scheduled(cron = "0 20 * * * *", zone = "Europe/Berlin")
-    @Async
-    public void runScheduledScrape() {
+    /** Executes the Kleinanzeigen part of the shared active-marketplace cycle. */
+    public void runScrape() {
         if (!scrapingEnabled.isEnabled()) return;
         LOGGER.log(Level.INFO, "Kleinanzeigen-Scrape gestartet");
         int total = 0;
@@ -108,6 +107,14 @@ public class KleinanzeigenPriceService {
             LOGGER.log(Level.INFO, "Kleinanzeigen '" + query + "': " + report.summary());
         }
         LOGGER.log(Level.INFO, "Kleinanzeigen-Scrape fertig, " + total + " Ads verarbeitet");
+    }
+
+    /** Führt einen gezielten Produkt-Lookup für den kombinierten Preis-Endpoint aus. */
+    public KleinanzeigenScrapeReport lookup(String query) {
+        if (!scrapingEnabled.isEnabled() || query == null || query.isBlank()) {
+            return new KleinanzeigenScrapeReport(0, 0, 0, 0, 0, 0);
+        }
+        return processAds(scraper().fetch(query.trim(), 2));
     }
 
     // ------------------------------------------------------------------------
@@ -226,6 +233,16 @@ public class KleinanzeigenPriceService {
         return reviewRepository.findReviewQueue(C2cMatchReview.Status.PENDING);
     }
 
+    @Transactional(readOnly = true)
+    public List<C2cMatchReview> getReviews(C2cMatchReview.Status status) {
+        return reviewRepository.findByStatus(status);
+    }
+
+    @Transactional(readOnly = true)
+    public C2cMatchReview getReview(Long id) {
+        return reviewRepository.findById(id).orElse(null);
+    }
+
     /**
      * Bestätigt eine Review (Lern-Schleife):
      * <ol>
@@ -242,17 +259,30 @@ public class KleinanzeigenPriceService {
      */
     @Transactional
     public de.verdox.hwapi.identity.ProductIdentity confirmC2cMatch(Long reviewId, String confirmedBy) {
+        return confirmC2cMatch(reviewId, confirmedBy, null, null);
+    }
+
+    @Transactional
+    public de.verdox.hwapi.identity.ProductIdentity confirmC2cMatch(Long reviewId, String confirmedBy,
+                                                                      String correctedEan, String correctedMpn) {
         C2cMatchReview review = reviewRepository.findById(reviewId).orElse(null);
         if (review == null) {
             return null;
         }
 
-        de.verdox.hwapi.identity.ProductIdentity identity = productRegistryService.confirmC2cTitle(
+        String ean = correctedEan != null && !correctedEan.isBlank() ? correctedEan : review.getMatchedEan();
+        String mpn = correctedMpn != null && !correctedMpn.isBlank() ? correctedMpn : review.getMatchedMpn();
+        boolean correction = correctedEan != null || correctedMpn != null;
+        de.verdox.hwapi.identity.ProductIdentity identity = (correction ? productRegistryService.reassignC2cTitle(
+                review.getRawTitle(), ean != null ? List.of(ean) : List.of(), mpn != null ? List.of(mpn) : List.of(), SOURCE
+        ) : productRegistryService.confirmC2cTitle(
                 review.getRawTitle(),
-                review.getMatchedEan() != null ? List.of(review.getMatchedEan()) : List.of(),
-                review.getMatchedMpn() != null ? List.of(review.getMatchedMpn()) : List.of(),
+                ean != null ? List.of(ean) : List.of(),
+                mpn != null ? List.of(mpn) : List.of(),
                 SOURCE
-        );
+        ));
+        review.setMatchedEan(ean);
+        review.setMatchedMpn(mpn);
 
         // Kein Preis-Upsert hier: der Preis ist in der Review nicht bekannt und ein
         // Platzhalter-Snapshot würde die Preisdaten verschmutzen. Beim nächsten Scrape

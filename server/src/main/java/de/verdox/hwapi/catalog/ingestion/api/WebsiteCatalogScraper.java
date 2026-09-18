@@ -5,7 +5,9 @@ import de.verdox.hwapi.catalog.ingestion.ScrapingService;
 import de.verdox.hwapi.catalog.ingestion.api.selenium.CookieJar;
 import de.verdox.hwapi.catalog.ingestion.api.selenium.FScrapingCache;
 import de.verdox.hwapi.catalog.ingestion.api.selenium.FetchOptions;
+import de.verdox.hwapi.catalog.ingestion.api.selenium.DomainRateLimiter;
 import de.verdox.hwapi.catalog.ingestion.api.selenium.SeleniumBasedWebScraper;
+import de.verdox.hwapi.catalog.ingestion.images.ProductImageCandidates;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import lombok.Getter;
 import lombok.Setter;
@@ -19,8 +21,10 @@ import java.net.MalformedURLException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.stream.Stream;
+import java.util.function.IntConsumer;
 
 public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWARE>> implements ComponentWebScraper<HARDWARE> {
     private final String domain;
@@ -32,6 +36,10 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
     @Setter
     private WebsiteScrapingStrategy websiteScrapingStrategy;
     private CatalogCheckpointStore productCheckpoints;
+    private volatile int discoveredDetailPages = -1;
+    private volatile int discoveredPaginationPages;
+    private volatile IntConsumer paginationProgressListener = ignored -> {};
+    private final AtomicInteger unreachableDetailPages = new AtomicInteger();
 
     public WebsiteCatalogScraper(String domain, String id, String... urlsToScrape) {
         this.domain = domain;
@@ -42,6 +50,8 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
     @Override
     public Stream<ScrapedSpecPage> downloadWebsites() throws Throwable {
+        unreachableDetailPages.set(0);
+        discoveredPaginationPages = 0;
         Set<WebsiteScrapingStrategy.SinglePageCandidate> singlePages = new HashSet<>();
         Set<String> alreadyCollected = new HashSet<>();
         Queue<WebsiteScrapingStrategy.MultiPageCandidate> multiPages = new ArrayDeque<>(urlsToScrape.stream().map(WebsiteScrapingStrategy.MultiPageCandidate::new).toList());
@@ -76,10 +86,18 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
 
                 websiteScrapingStrategy.extractMultiPageURLs(nextCandidate.url(), doc, multiPages);
                 websiteScrapingStrategy.extractSinglePagesURLs(nextCandidate.url(), doc, singlePages);
+                // singlePages contains products and can therefore be in the
+                // thousands. For the pagination progress we need the number
+                // of catalog URLs already fetched instead.
+                discoveredPaginationPages = alreadyCollected.size();
+                paginationProgressListener.accept(discoveredPaginationPages);
 
             } catch (SeleniumBasedWebScraper.ChallengeFoundException e) {
                 ScrapingService.LOGGER.log(Level.SEVERE, "\tChallenge found on domain " + domain);
                 challengeFound.set(true);
+            } catch (DomainRateLimiter.DomainPausedException e) {
+                ScrapingService.LOGGER.log(Level.INFO, "\tSkipping paused domain " + domain + " for " + e.remaining().toMinutes() + " minutes");
+                return Stream.of();
             }
         }
 
@@ -96,6 +114,7 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
                 .filter(candidate -> !alreadyCollected.contains(candidate.urls()))
                 .filter(candidate -> checkpoints == null || checkpoints.isDue(candidate.urls(), productRevalidation))
                 .count();
+        discoveredDetailPages = (int) dueProducts;
         if (checkpoints != null) {
             ScrapingService.LOGGER.info("\t" + dueProducts + " new or due product pages for " + topLevelHost + " [" + id + "]");
         }
@@ -145,7 +164,10 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
                 challengeFound.set(true);
                 ScrapingService.LOGGER.log(Level.SEVERE, "\tChallenge found on domain " + domain);
                 return null;
+            } catch (DomainRateLimiter.DomainPausedException e) {
+                throw e;
             } catch (TimeoutException timeoutException) {
+                unreachableDetailPages.incrementAndGet();
                 ScrapingService.LOGGER.log(Level.SEVERE, "\tTimeout while scraping single pages " + singlePageCandidate.urls());
                 try {
                     seleniumBasedWebScraper.restartDriver();
@@ -154,12 +176,38 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
                 }
                 return null;
             } catch (Throwable ex) {
+                unreachableDetailPages.incrementAndGet();
                 ScrapingService.LOGGER.log(Level.SEVERE, "\tCould not scrape single pages " + singlePageCandidate.urls(), ex);
                 return null;
             } finally {
                 alreadyCollected.addAll(singlePageCandidate.urls());
             }
         }).filter(Objects::nonNull);
+    }
+
+    @Override
+    public int getDiscoveredDetailPages() {
+        return discoveredDetailPages;
+    }
+
+    @Override
+    public int getDiscoveredPaginationPages() {
+        return discoveredPaginationPages;
+    }
+
+    @Override
+    public void setPaginationProgressListener(IntConsumer listener) {
+        paginationProgressListener = listener == null ? ignored -> {} : listener;
+    }
+
+    @Override
+    public int getUnreachableDetailPages() {
+        return unreachableDetailPages.get();
+    }
+
+    @Override
+    public Duration getMinLiveRequestInterval() {
+        return seleniumBasedWebScraper.getMinLiveRequestInterval();
     }
 
     @Override
@@ -186,6 +234,7 @@ public abstract class WebsiteCatalogScraper<HARDWARE extends HardwareSpec<HARDWA
         }
 
         Map<String, List<String>> specs = websiteScrapingStrategy.extractSpecMap(merged);
+        ProductImageCandidates.addTo(specs, merged);
         specs.putAll(scrapedPage.singlePageCandidate().specMap());
 
         return new ScrapedSpecs(scrapedPage.singlePageCandidate().urls(), specs);

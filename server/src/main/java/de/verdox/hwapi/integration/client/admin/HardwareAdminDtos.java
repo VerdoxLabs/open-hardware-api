@@ -17,9 +17,10 @@ public final class HardwareAdminDtos {
     ) {}
 
     public record ScraperStatus(
-            String id, String baseUrl, boolean running, String currentUrl,
-            int processedPages, int estimatedPages, String message, String lastError,
-            Instant startedAt, Instant finishedAt, java.util.List<FailedScrape> failedLinks
+            String id, String baseUrl, boolean running, String phase, String currentUrl,
+            int processedPages, int recognizedPages, int unreachablePages, int estimatedPages, int paginationPagesFound, String message, String lastError,
+              Instant startedAt, Instant finishedAt, java.util.List<FailedScrape> failedLinks,
+              boolean paginationKnown, long estimatedDurationSeconds, Instant pausedUntil
     ) {}
 
     public record FailedScrape(String url, String reason, Instant failedAt) {}

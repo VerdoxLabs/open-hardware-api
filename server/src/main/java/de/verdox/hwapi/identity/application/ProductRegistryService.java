@@ -391,6 +391,26 @@ ProductRegistryService {
         return mergeIdentifiersIntoIdentity(identifiers);
     }
 
+    /** Reassigns a learned C2C title before registering its corrected product codes. */
+    @Transactional
+    public ProductIdentity reassignC2cTitle(String rawTitle, Collection<String> eans,
+                                            Collection<String> mpns, String source) {
+        String cleaned = C2CTitleCleaner.clean(rawTitle);
+        detach(ProductIdentifier.IdentifierType.TITLE, rawTitle);
+        detach(ProductIdentifier.IdentifierType.TITLE_NORMALIZED, cleaned);
+        return confirmC2cTitle(rawTitle, eans, mpns, source);
+    }
+
+    private void detach(ProductIdentifier.IdentifierType type, String value) {
+        if (value == null || value.isBlank()) return;
+        productIdentifierRepository.findByTypeAndIdentifier(type, value).ifPresent(identifier -> {
+            ProductIdentity identity = identifier.getIdentity();
+            if (identity != null) identity.getIdentifiers().remove(identifier);
+            identifier.setIdentity(null);
+            productIdentifierRepository.save(identifier);
+        });
+    }
+
     /**
      * Fasst die Identifiers in genau einer Identity zusammen:
      * keine vorhanden → neue Identity; genau eine → übernehmen; mehrere → mergen

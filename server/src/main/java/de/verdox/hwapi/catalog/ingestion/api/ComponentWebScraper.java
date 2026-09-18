@@ -11,10 +11,12 @@ import org.jsoup.nodes.Document;
 
 import java.net.URI;
 import java.util.*;
+import java.time.Duration;
 import java.util.function.BiPredicate;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.function.IntConsumer;
 
 public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
 
@@ -42,6 +44,18 @@ public interface ComponentWebScraper<HARDWARE extends HardwareSpec> {
     }
 
     int getAmountTasks();
+
+    default Duration getMinLiveRequestInterval() { return Duration.ZERO; }
+
+    /** Anzahl der Detailseiten, nachdem die Pagination vollständig entdeckt wurde. */
+    default int getDiscoveredDetailPages() { return -1; }
+
+    default int getDiscoveredPaginationPages() { return -1; }
+
+    default void setPaginationProgressListener(IntConsumer listener) {}
+
+    /** Detailseiten, die beim Abruf technisch nicht erreichbar waren. */
+    default int getUnreachableDetailPages() { return 0; }
 
     interface ScrapeListener<HARDWARE extends HardwareSpec> {
         void onScrape(HARDWARE scrapedHardware);

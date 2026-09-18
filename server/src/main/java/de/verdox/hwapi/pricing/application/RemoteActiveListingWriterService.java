@@ -3,6 +3,7 @@ package de.verdox.hwapi.pricing.application;
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import de.verdox.hwapi.catalog.domain.values.Currency;
+import de.verdox.hwapi.catalog.ingestion.images.ProductImageStore;
 import de.verdox.hwapi.pricing.model.ListingEnums;
 import de.verdox.hwapi.pricing.model.ListingPricePoint;
 import de.verdox.hwapi.pricing.model.RemoteActiveListing;
@@ -97,11 +98,11 @@ public class RemoteActiveListingWriterService {
         String nimg = normalize(merchantImageUrl);
 
         if (nmpn != null) {
-            pendingLinks.put(nmpn, new PendingLink(nean, nmpn, nimg));
+            pendingLinks.put(nmpn, new PendingLink(nean, nmpn, nimg, firstNonBlank(itemUrl, "https://www.awin.com/")));
         }
 
         if (nean != null) {
-            pendingLinks.put(nean, new PendingLink(nean, nmpn, nimg));
+            pendingLinks.put(nean, new PendingLink(nean, nmpn, nimg, firstNonBlank(itemUrl, "https://www.awin.com/")));
         }
 
         return listing;
@@ -148,13 +149,14 @@ public class RemoteActiveListingWriterService {
 
         // Updates anwenden
         Set<HardwareSpec<?>> changed = new HashSet<>();
+        Set<String> attachedImages = new HashSet<>();
         for (PendingLink p : batch) {
             if (p.mpn != null) {
                 HardwareSpec<?> s = byMpn.get(p.mpn);
                 if (s != null) {
                     boolean dirty = false;
                     if (p.ean != null && !s.getEANs().contains(p.ean)) { s.getEANs().add(p.ean); dirty = true; }
-                    if (p.img != null && !s.getPictureUrls().contains(p.img)) { s.getPictureUrls().add(p.img); dirty = true; }
+                    if (p.img != null && attachedImages.add(s.getId() + "|" + p.img)) dirty |= ProductImageStore.storeExternal(p.img, s, p.sourcePage);
                     if (dirty) changed.add(s);
                 }
             }
@@ -163,7 +165,7 @@ public class RemoteActiveListingWriterService {
                 if (s != null) {
                     boolean dirty = false;
                     if (p.mpn != null && !s.getMPNs().contains(p.mpn)) { s.getMPNs().add(p.mpn); dirty = true; }
-                    if (p.img != null && !s.getPictureUrls().contains(p.img)) { s.getPictureUrls().add(p.img); dirty = true; }
+                    if (p.img != null && attachedImages.add(s.getId() + "|" + p.img)) dirty |= ProductImageStore.storeExternal(p.img, s, p.sourcePage);
                     if (dirty) changed.add(s);
                 }
             }
@@ -175,7 +177,63 @@ public class RemoteActiveListingWriterService {
         }
     }
 
-    private record PendingLink(String ean, String mpn, String img) {
+    private record PendingLink(String ean, String mpn, String img, String sourcePage) {
+    }
+
+    /** Links images from already imported Awin listings to newly imported catalog records. */
+    public void attachImagesForHardware(Collection<? extends HardwareSpec<?>> importedSpecs) {
+        if (importedSpecs == null || importedSpecs.isEmpty()) return;
+        Set<String> identifiers = new HashSet<>();
+        for (HardwareSpec<?> spec : importedSpecs) {
+            if (spec.getEANs() != null) for (String value : spec.getEANs()) {
+                String normalized = HardwareSpec.normalizeEan(value);
+                if (normalized != null) identifiers.add(normalized);
+            }
+            if (spec.getMPNs() != null) for (String value : spec.getMPNs()) {
+                String normalized = HardwareSpec.normalizeMpn(value);
+                if (normalized != null) identifiers.add(normalized);
+            }
+        }
+        if (identifiers.isEmpty()) return;
+
+        List<HardwareSpec<?>> specs = hardwareSpecService.findAllByEANOrMPN(new ArrayList<>(identifiers));
+        Map<String, HardwareSpec<?>> byIdentifier = new HashMap<>();
+        for (HardwareSpec<?> spec : specs) {
+            if (spec.getEANs() != null) for (String value : spec.getEANs()) {
+                String normalized = HardwareSpec.normalizeEan(value);
+                if (normalized != null) byIdentifier.putIfAbsent(normalized, spec);
+            }
+            if (spec.getMPNs() != null) for (String value : spec.getMPNs()) {
+                String normalized = HardwareSpec.normalizeMpn(value);
+                if (normalized != null) byIdentifier.putIfAbsent(normalized, spec);
+            }
+        }
+
+        Set<HardwareSpec<?>> changed = new HashSet<>();
+        Set<String> attachedImages = new HashSet<>();
+        for (RemoteActiveListing listing : listingRepository.findAllByMerchantImageUrlIsNotNull()) {
+            HardwareSpec<?> spec = findByIdentifier(byIdentifier, listing.getEan(), listing.getMpn());
+            if (spec == null || listing.getMerchantImageUrl() == null
+                    || !attachedImages.add(spec.getId() + "|" + listing.getMerchantImageUrl())) continue;
+            if (ProductImageStore.storeExternal(listing.getMerchantImageUrl(), spec,
+                    firstNonBlank(listing.getItemUrl(), "https://www.awin.com/"))) changed.add(spec);
+        }
+        if (!changed.isEmpty()) {
+            hardwareSpecService.saveHardwareBatch(changed);
+            LOGGER.info("Attached " + changed.size() + " Awin product images to hardware specs");
+        }
+    }
+
+    private static HardwareSpec<?> findByIdentifier(Map<String, HardwareSpec<?>> byIdentifier, String ean, String mpn) {
+        String normalizedEan = HardwareSpec.normalizeEan(ean);
+        HardwareSpec<?> spec = normalizedEan == null ? null : byIdentifier.get(normalizedEan);
+        if (spec != null) return spec;
+        String normalizedMpn = HardwareSpec.normalizeMpn(mpn);
+        return normalizedMpn == null ? null : byIdentifier.get(normalizedMpn);
+    }
+
+    private static String firstNonBlank(String first, String fallback) {
+        return first == null || first.isBlank() ? fallback : first;
     }
 
     private static String normalize(String s) {

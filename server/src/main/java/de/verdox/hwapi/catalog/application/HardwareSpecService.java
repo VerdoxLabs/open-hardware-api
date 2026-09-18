@@ -1,5 +1,6 @@
 package de.verdox.hwapi.catalog.application;
 
+import de.verdox.hwapi.admin.HardwareLiveUpdateService;
 import de.verdox.hwapi.catalog.persistence.*;
 import de.verdox.hwapi.catalog.ingestion.ScrapingService;
 import de.verdox.hwapi.catalog.ingestion.api.ComponentWebScraper;
@@ -18,6 +19,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.text.Normalizer;
 import java.util.*;
+import java.time.Instant;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -48,6 +50,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     private final Set<String> validTypes;
     private final ProductRegistryService productRegistryService;
     private final HardwareSpecCache cache;
+    private final HardwareLiveUpdateService liveUpdateService;
 
     @Autowired
     public HardwareSpecService(
@@ -77,7 +80,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             ExternalHardDriveRepository externalHardDriveRepository,
             OpticalDriveRepository opticalDriveRepository,
             OperatingSystemRepository operatingSystemRepository,
-            ProductRegistryService productRegistryService
+            ProductRegistryService productRegistryService,
+            HardwareLiveUpdateService liveUpdateService
     ) {
         this.baseRepo = baseRepo;
         this.gpuChipRepository = gpuChipRepository;
@@ -108,6 +112,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         repoByType.put(OperatingSystem.class, operatingSystemRepository);
 
         this.cache = cache;
+        this.liveUpdateService = liveUpdateService;
 
         // load normalized manufacturers (defensive: normalize again)
         try {
@@ -381,6 +386,8 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
     public void saveHardware(HardwareSpec<?> incoming) {
         if (incoming == null) return;
 
+        Instant detectedAt = Instant.now();
+
         rememberManufacturer(incoming.getManufacturer());
 
         final var eans = incoming.getEANs();
@@ -396,10 +403,14 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             if (!sanitizeBeforeSave(incoming)) {
                 return;
             }
+            incoming.setDetectedAt(detectedAt);
             baseRepo.save(incoming);
             saveWithSpecificRepo(incoming);
 
-            afterCommit(() -> cache.put(incoming));
+            afterCommit(() -> {
+                cache.put(incoming);
+                liveUpdateService.publishHardwareUpdated();
+            });
             return;
         }
 
@@ -413,6 +424,9 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
 
         HardwareSpec<?> target = sameTypeMatches.iterator().next();
 
+        // Keep the original detection timestamp.  Existing hardware is merged on
+        // every scrape (and also by marketplace-link updates), but must not look
+        // like a new catalog entry in the admin frontend as a result.
         target.tryMerge(incoming);
 
         for (HardwareSpec<?> other : sameTypeMatches) {
@@ -431,7 +445,10 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         baseRepo.save(target);
         saveWithSpecificRepo(target);
 
-        afterCommit(() -> cache.put(target));
+        afterCommit(() -> {
+            cache.put(target);
+            liveUpdateService.publishHardwareUpdated();
+        });
     }
 
     @Transactional
@@ -469,6 +486,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             Map<String, HardwareSpec<?>> byMpn,
             int keyChunkSize
     ) {
+        Instant detectedAt = Instant.now();
         Set<String> eans = new HashSet<>();
         Set<String> mpns = new HashSet<>();
 
@@ -505,6 +523,11 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 continue;
             }
 
+            if (hasCrossTypeIdentifierConflict(incoming, byEan, byMpn)) {
+                LOGGER.warning("Identifier conflict across hardware types; skipping " + incoming.displayName());
+                continue;
+            }
+
             HardwareSpec<?> target = findTargetForIncoming(incoming, byEan, byMpn);
 
             if (target == null) {
@@ -512,9 +535,12 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
                 if (!sanitizeBeforeSave(target)) {
                     continue;
                 }
+                target.setDetectedAt(detectedAt);
                 toPersist.add(target);
                 indexKeys(target, byEan, byMpn);
             } else {
+                // Do not refresh detectedAt for an existing catalog entry.  The
+                // timestamp represents the first detection, not the last merge.
                 target.tryMerge(incoming);
 
                 if (!sanitizeBeforeSave(target)) {
@@ -543,6 +569,7 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
             for (HardwareSpec<?> spec : persistedSnapshot) {
                 cache.put(spec);
             }
+            liveUpdateService.publishHardwareUpdated();
         });
     }
 
@@ -674,6 +701,27 @@ public class HardwareSpecService implements ComponentWebScraper.ScrapeListener<H
         }
 
         return anyMatch != null && anyMatch.getClass().equals(incoming.getClass()) ? anyMatch : null;
+    }
+
+    private boolean hasCrossTypeIdentifierConflict(
+            HardwareSpec<?> incoming,
+            Map<String, HardwareSpec<?>> byEan,
+            Map<String, HardwareSpec<?>> byMpn
+    ) {
+        Set<HardwareSpec<?>> candidates = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (incoming.getEANs() != null) {
+            for (String ean : incoming.getEANs()) {
+                HardwareSpec<?> candidate = byEan.get(HardwareSpec.normalizeEan(ean));
+                if (candidate != null) candidates.add(candidate);
+            }
+        }
+        if (incoming.getMPNs() != null) {
+            for (String mpn : incoming.getMPNs()) {
+                HardwareSpec<?> candidate = byMpn.get(HardwareSpec.normalizeMpn(mpn));
+                if (candidate != null) candidates.add(candidate);
+            }
+        }
+        return candidates.stream().anyMatch(candidate -> !candidate.getClass().equals(incoming.getClass()));
     }
 
     private void saveWithSpecificRepo(HardwareSpec<?> entity) {

@@ -1,6 +1,7 @@
 package de.verdox.hwapi.catalog.ingestion;
 
 import de.verdox.hwapi.catalog.application.HardwareSpecService;
+import de.verdox.hwapi.admin.HardwareLiveUpdateService;
 import de.verdox.hwapi.catalog.application.HardwareSyncService;
 import de.verdox.hwapi.configuration.ScrapingEnabled;
 import de.verdox.hwapi.catalog.ingestion.api.ComponentWebScraper;
@@ -10,6 +11,8 @@ import de.verdox.hwapi.catalog.ingestion.websites.pc_builder_io.PCBuilderIOScrap
 import de.verdox.hwapi.catalog.ingestion.websites.pc_kombo.PCKomboScrapers;
 import de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker.PCPartPickerCpuScraper;
 import de.verdox.hwapi.catalog.ingestion.websites.pcpartpicker.PCPartPickerScrapers;
+import de.verdox.hwapi.catalog.ingestion.opendb.OpenDbImportService;
+import de.verdox.hwapi.catalog.ingestion.api.selenium.DomainRateLimiter;
 import de.verdox.hwapi.catalog.domain.CPU;
 import de.verdox.hwapi.catalog.domain.HardwareSpec;
 import de.verdox.hwapi.identity.ProductIdentifier;
@@ -38,6 +41,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class ScrapingService {
@@ -85,6 +89,8 @@ public class ScrapingService {
     private final ProductRegistryService productRegistryService;
     private final TaskExecutor jobExecutor;
     private final ScrapingEnabled scrapingEnabled;
+    private final HardwareLiveUpdateService liveUpdateService;
+    private final OpenDbImportService openDbImportService;
 
     private CompletableFuture<Void> currentlyRunning;
 
@@ -105,17 +111,21 @@ public class ScrapingService {
             HardwareSyncService hardwareSyncService,
             ProductRegistryService productRegistryService,
             @Qualifier("jobExecutor") TaskExecutor jobExecutor,
-            ScrapingEnabled scrapingEnabled
+            ScrapingEnabled scrapingEnabled,
+            HardwareLiveUpdateService liveUpdateService,
+            OpenDbImportService openDbImportService
     ) {
         this.hardwareSpecService = hardwareSpecService;
         this.hardwareSyncService = hardwareSyncService;
         this.productRegistryService = productRegistryService;
         this.jobExecutor = jobExecutor;
         this.scrapingEnabled = scrapingEnabled;
+        this.liveUpdateService = liveUpdateService;
+        this.openDbImportService = openDbImportService;
 
         addListener(hardwareSpecService);
         this.scrapers = setupScrapers();
-        this.scrapers.forEach(scraper -> scraperProgress.put(scraper.id(),
+        this.scrapers.forEach(scraper -> scraperProgress.put(statusKey(scraper),
                 new ScraperProgress(scraper.id(), scraper.baseURL(), safeTaskEstimate(scraper))));
     }
 
@@ -174,6 +184,7 @@ public class ScrapingService {
 
         // Gesamtgewicht berechnen
         totalTasksWeighted = 1;
+        totalTasksWeighted += 1;
 
         for (ComponentWebScraper<?> scraper : scrapers) {
             try {
@@ -200,6 +211,20 @@ public class ScrapingService {
      * ------------------------------------------------------------ */
 
     private void doScrape() {
+
+        // OpenDB is a versioned source catalog, not a website. Import it before
+        // retailer scrapers so their EAN/MPN observations can enrich known parts.
+        setStatus("BuildCores OpenDB Import…");
+        var openDbResult = openDbImportService.importLatest();
+        if (!openDbResult.enabled()) {
+            LOGGER.info("BuildCores OpenDB import is disabled.");
+        } else if (openDbResult.error() != null) {
+            LOGGER.log(Level.WARNING, "BuildCores OpenDB import failed: " + openDbResult.error());
+        } else {
+            LOGGER.info("BuildCores OpenDB imported " + openDbResult.imported()
+                    + " records (" + openDbResult.invalid() + " invalid)");
+        }
+        stepDone(1);
 
         // --- AMD CSV ---
         setStatus("AMD CPU CSV Import…");
@@ -238,15 +263,32 @@ public class ScrapingService {
 
     private void scrapeOne(ComponentWebScraper<? extends HardwareSpec> scraper) {
         int weight = Math.max(1, scraper.getAmountTasks());
-        ScraperProgress progress = scraperProgress.get(scraper.id());
+        ScraperProgress progress = scraperProgress.get(statusKey(scraper));
         if (progress != null) progress.start();
+        if (progress != null) {
+            scraper.setPaginationProgressListener(pages -> {
+                progress.paginationPagesFound(pages);
+                liveUpdateService.publishScraperStatus();
+            });
+        }
         setStatus("Scraper: " + scraper.baseURL() + " / " + scraper.id());
 
         try {
             long start = System.currentTimeMillis();
             AtomicLong counter = new AtomicLong();
 
-            Set scrapedSpecs = scraper.downloadWebsites()
+            Stream<ComponentWebScraper.ScrapedSpecPage> discoveredStream = scraper.downloadWebsites();
+            int discoveredDetailPages = scraper.getDiscoveredDetailPages();
+            if (progress != null && discoveredDetailPages >= 0) {
+                progress.paginationDiscovered(discoveredDetailPages, scraper.getMinLiveRequestInterval());
+                liveUpdateService.publishScraperStatus();
+            }
+
+            if (progress != null) {
+                progress.detailsStarted();
+                liveUpdateService.publishScraperStatus();
+            }
+            Set scrapedSpecs = discoveredStream
                     .map(page -> {
                         updateCurrentPage(scraper, page.singlePageCandidate().urls());
                         try {
@@ -257,6 +299,7 @@ public class ScrapingService {
                             }
                             var result = scraper.parse(map, this::callScrapeEvent);
                             result.ifPresent(hardwareSpec -> {
+                                if (progress != null) progress.hardwareRecognized();
                                 scraper.markProcessed(page);
                                 setStatus("Scraper: " + hardwareSpec.getMpnsSorted().getFirst()
                                         + " / " + scraper.id() + " [" + counter.getAndIncrement() + "]");
@@ -277,16 +320,28 @@ public class ScrapingService {
                     .filter(h -> !h.getModel().isBlank())
                     .collect(Collectors.toSet());
 
+            if (progress != null) progress.unreachablePages(scraper.getUnreachableDetailPages());
+
+            if (progress != null && discoveredDetailPages < 0) {
+                progress.paginationDiscovered(progress.processedPages(), scraper.getMinLiveRequestInterval());
+            }
+
             hardwareSpecService.onScrapeMulti(scrapedSpecs);
 
             LOGGER.info("Scraper " + scraper.id() + " finished in "
                     + (System.currentTimeMillis() - start) + " ms");
         } catch (Throwable t) {
-            progressError(scraper, null, t);
-            LOGGER.log(Level.SEVERE, "Scraper crashed: " + scraper.id(), t);
+            if (t instanceof DomainRateLimiter.DomainPausedException paused) {
+                LOGGER.log(Level.INFO, "Scraper " + scraper.id() + " yielded because domain {0} is paused for another {1} minutes",
+                        new Object[]{scraper.baseURL(), Math.max(1, paused.remaining().toMinutes())});
+            } else {
+                progressError(scraper, null, t);
+                LOGGER.log(Level.SEVERE, "Scraper crashed: " + scraper.id(), t);
+            }
         } finally {
             if (progress != null) progress.finish();
             stepDone(weight);
+            liveUpdateService.publishScraperStatus();
         }
     }
 
@@ -302,6 +357,7 @@ public class ScrapingService {
 
     private void setStatus(String msg) {
         statusMessage.set(msg);
+        liveUpdateService.publishScraperStatus();
     }
 
     public List<HardwareAdminDtos.ScraperStatus> getScraperStatuses() {
@@ -320,7 +376,7 @@ public class ScrapingService {
     }
 
     private void updateCurrentPage(ComponentWebScraper<?> scraper, Set<String> urls) {
-        ScraperProgress progress = scraperProgress.get(scraper.id());
+        ScraperProgress progress = scraperProgress.get(statusKey(scraper));
         String url = urls == null ? null : urls.stream().findFirst().orElse(null);
         if (progress != null) progress.pageStarted(url);
         setStatus("Scraper: " + scraper.baseURL() + " / " + scraper.id()
@@ -328,7 +384,7 @@ public class ScrapingService {
     }
 
     private void progressError(ComponentWebScraper<?> scraper, Set<String> urls, Throwable error) {
-        ScraperProgress progress = scraperProgress.get(scraper.id());
+        ScraperProgress progress = scraperProgress.get(statusKey(scraper));
         if (progress != null) {
             String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
             progress.error(message);
@@ -337,19 +393,29 @@ public class ScrapingService {
     }
 
     private void recordFailedLink(ComponentWebScraper<?> scraper, Set<String> urls, String reason) {
-        ScraperProgress progress = scraperProgress.get(scraper.id());
+        ScraperProgress progress = scraperProgress.get(statusKey(scraper));
         if (progress != null && urls != null) {
             urls.forEach(url -> progress.failedLink(url, reason));
         }
     }
 
+    private static String statusKey(ComponentWebScraper<?> scraper) {
+        return scraper.baseURL() + "::" + scraper.id();
+    }
+
     private static final class ScraperProgress {
         private final String id;
         private final String baseUrl;
-        private final int estimatedPages;
+        private volatile int estimatedPages;
+        private volatile boolean paginationKnown;
+        private volatile long estimatedDurationSeconds;
         private volatile boolean running;
+        private volatile String phase = "WAITING";
         private volatile String currentUrl;
         private volatile int processedPages;
+        private volatile int paginationPagesFound;
+        private volatile int recognizedPages;
+        private volatile int unreachablePages;
         private volatile String message = "Wartet auf nächsten Lauf";
         private volatile String lastError;
         private volatile Instant startedAt;
@@ -363,10 +429,22 @@ public class ScrapingService {
         }
 
         String id() { return id; }
-        void resetForRun() { running = false; currentUrl = null; processedPages = 0; lastError = null; finishedAt = null; failedLinks.clear(); message = "Wartet auf nächsten Lauf"; }
-        void start() { running = true; startedAt = Instant.now(); message = "Scraper gestartet"; }
-        void pageStarted(String url) { currentUrl = url; message = url == null ? "Seite wird geladen" : "Lade " + url; }
+        void resetForRun() { running = false; phase = "WAITING"; currentUrl = null; processedPages = 0; paginationPagesFound = 0; recognizedPages = 0; unreachablePages = 0; paginationKnown = false; estimatedPages = 0; estimatedDurationSeconds = 0; lastError = null; finishedAt = null; failedLinks.clear(); message = "Wartet auf nächsten Lauf"; }
+        void start() { running = true; phase = "PAGINATION"; startedAt = Instant.now(); message = "Pagination-Seiten werden ermittelt"; }
+        void detailsStarted() { phase = "DETAILS"; currentUrl = null; message = "Detailseiten werden verarbeitet"; }
+        void pageStarted(String url) { phase = "DETAILS"; currentUrl = url; message = url == null ? "Detailseite wird geladen" : "Lade " + url; }
         void pageFinished() { processedPages++; }
+        void paginationPagesFound(int pages) { paginationPagesFound = Math.max(paginationPagesFound, pages); }
+        void hardwareRecognized() { recognizedPages++; }
+        void unreachablePages(int pages) { unreachablePages = Math.max(0, pages); }
+        int processedPages() { return processedPages; }
+        void paginationDiscovered(int pages, Duration delay) {
+            estimatedPages = Math.max(0, pages);
+            paginationKnown = true;
+            long delaySeconds = delay == null ? 0 : Math.max(0, delay.toSeconds());
+            estimatedDurationSeconds = (long) estimatedPages * (delaySeconds + 1);
+            message = "Pagination vollständig ermittelt";
+        }
         void error(String error) { lastError = error; message = "Fehler beim Verarbeiten der aktuellen Seite"; }
         void failedLink(String url, String reason) {
             if (url == null || url.isBlank()) return;
@@ -377,8 +455,19 @@ public class ScrapingService {
                 }
             }
         }
-        void finish() { running = false; currentUrl = null; finishedAt = Instant.now(); message = lastError == null ? "Abgeschlossen" : "Mit Fehlern abgeschlossen"; }
-        HardwareAdminDtos.ScraperStatus snapshot() { synchronized (failedLinks) { return new HardwareAdminDtos.ScraperStatus(id, baseUrl, running, currentUrl, processedPages, estimatedPages, message, lastError, startedAt, finishedAt, List.copyOf(failedLinks)); } }
+        void finish() { running = false; phase = "COMPLETED"; currentUrl = null; finishedAt = Instant.now(); message = lastError == null ? "Abgeschlossen" : "Mit Fehlern abgeschlossen"; }
+        HardwareAdminDtos.ScraperStatus snapshot() {
+            synchronized (failedLinks) {
+                Instant pausedUntil = DomainRateLimiter.pausedUntil(baseUrl);
+                String visiblePhase = pausedUntil == null ? phase : "PAUSED";
+                String visibleMessage = pausedUntil == null ? message : "Domain pausiert bis " + pausedUntil;
+                return new HardwareAdminDtos.ScraperStatus(id, baseUrl, pausedUntil == null && running,
+                        visiblePhase, currentUrl, processedPages, recognizedPages, unreachablePages,
+                        estimatedPages, paginationPagesFound, visibleMessage, lastError, startedAt,
+                        finishedAt, List.copyOf(failedLinks), paginationKnown, estimatedDurationSeconds,
+                        pausedUntil);
+            }
+        }
     }
 
     private <H extends HardwareSpec<H>> void callScrapeEvent(H hardwareSpec) {

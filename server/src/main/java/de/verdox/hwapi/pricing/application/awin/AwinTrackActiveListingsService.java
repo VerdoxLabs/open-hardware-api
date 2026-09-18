@@ -97,7 +97,6 @@ public class AwinTrackActiveListingsService {
     private Map<String, Long> mpnToSpecId = Map.of();
 
     @Scheduled(cron = "0 0 * * * *")
-    @Transactional
     @Async
     public void runDailyAwinImport() {
         if (!scrapingEnabled.isEnabled()) return;
@@ -136,7 +135,6 @@ public class AwinTrackActiveListingsService {
         return mpn == null ? null : mpn.trim();
     }
 
-    @Transactional
     public void updateFromAwinFeed() {
         long start = System.currentTimeMillis();
         LOGGER.log(Level.INFO, "Updating awin feed...");

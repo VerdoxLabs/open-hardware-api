@@ -8,6 +8,7 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.function.BiConsumer;
@@ -27,6 +28,10 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     @EqualsAndHashCode.Exclude
     @GeneratedValue(strategy = GenerationType.AUTO)
     private long id;
+
+    /** Zeitpunkt, an dem der Datensatz erstmals durch eine Erkennung angelegt wurde. */
+    @Column(name = "detected_at")
+    private Instant detectedAt;
 
     @NotBlank
     protected String manufacturer;
@@ -70,6 +75,15 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
     @Column(name = "url", nullable = false, length = 1024)
     protected Set<String> pictureUrls = new HashSet<>();
 
+    /** Provenance for locally mirrored product images.  The original image and product page
+     * remain available to the UI for attribution/copyright notices. */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+            name = "hardware_spec_image_attributions",
+            joinColumns = @JoinColumn(name = "spec_id")
+    )
+    protected Set<ProductImageAttribution> imageAttributions = new HashSet<>();
+
     protected LocalDate launchDate;
 
     public void addEAN(String ean) {
@@ -108,6 +122,15 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         if (pictureUrls != null) {
             this.pictureUrls.addAll(pictureUrls);
         }
+    }
+
+    public void addImageAttribution(ProductImageAttribution attribution) {
+        if (attribution != null) imageAttributions.add(attribution);
+    }
+
+    public void setImageAttributions(Set<ProductImageAttribution> imageAttributions) {
+        this.imageAttributions.clear();
+        if (imageAttributions != null) this.imageAttributions.addAll(imageAttributions);
     }
 
 
@@ -210,6 +233,7 @@ public abstract class HardwareSpec<SELF extends HardwareSpec<SELF>> {
         mergeSet(other, HardwareSpec::getEANs, HardwareSpec::setEANs);
         mergeSet(other, HardwareSpec::getMPNs, HardwareSpec::setMPNs);
         mergeSet(other, HardwareSpec::getPictureUrls, HardwareSpec::setPictureUrls);
+        mergeSet(other, HardwareSpec::getImageAttributions, HardwareSpec::setImageAttributions);
         mergeString(other, HardwareSpec::getModel, HardwareSpec::setModel);
         mergeString(other, HardwareSpec::getManufacturer, HardwareSpec::setManufacturer);
         merge(other, HardwareSpec::getLaunchDate, HardwareSpec::setLaunchDate, Objects::isNull);

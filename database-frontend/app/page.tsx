@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect -- polling synchronizes the UI with the Spring API */
-import {useCallback, useEffect, useState} from "react";
+import {Fragment, useCallback, useEffect, useState} from "react";
 import Link from "next/link";
 
 type Tab = "overview" | "database" | "scraper" | "awin";
@@ -25,13 +25,20 @@ type ScraperStatus = {
     id: string;
     baseUrl: string;
     running: boolean;
+    phase?: "WAITING" | "PAGINATION" | "DETAILS" | "COMPLETED" | "PAUSED";
     currentUrl?: string;
     processedPages: number;
+    recognizedPages: number;
+    unreachablePages: number;
     estimatedPages: number;
+    paginationPagesFound: number;
     message?: string;
     lastError?: string;
     startedAt?: string;
-    finishedAt?: string
+    finishedAt?: string;
+    paginationKnown: boolean;
+    estimatedDurationSeconds: number;
+    pausedUntil?: string
 };
 type AwinStatus = {
     running: boolean;
@@ -60,10 +67,13 @@ type Hardware = Record<string, unknown> & {
     eans?: string[];
     pictureUrls?: string[];
     displayPictureUrl?: string
+    detectedAt?: string
 };
 type SearchPage = { content: Hardware[]; totalElements: number; totalPages: number; number: number; size: number };
 type CacheSource = { website: string; category: string; cacheFiles: number; paginationPages: number; recognizedProducts: number; detailPages: number; latestCachedAt?: string };
 type CacheOverview = { scannedAt?: string; totalFiles: number; totalCatalogPages: number; totalRecognizedProducts: number; totalDetailPages: number; sources: CacheSource[] };
+type CacheWebsiteGroup = { website: string; categories: CacheSource[]; cacheFiles: number; paginationPages: number; recognizedProducts: number; detailPages: number; latestCachedAt?: string };
+type WebsiteScrapeStats = { website: string; processes: number; processed: number; recognized: number; unreachable: number; active: boolean };
 const TYPE_LABELS: Record<string, string> = {
     cpu: "CPU",
     gpu: "GPU",
@@ -88,10 +98,15 @@ const tabs: { id: Tab; label: string; icon: string }[] = [{
     icon: "↗"
 }];
 const num = (n?: number) => new Intl.NumberFormat("de-DE").format(n ?? 0);
-const date = (d?: string) => d ? new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short"
-}).format(new Date(d)) : "—";
+const date = (d?: string | number) => {
+    if (d === undefined || d === null || d === "") return "—";
+    const numeric = typeof d === "number" ? d : /^\d+(?:\.\d+)?$/.test(d) ? Number(d) : undefined;
+    const value = numeric === undefined ? new Date(d) : new Date(numeric < 1_000_000_000_000 ? numeric * 1000 : numeric);
+    return Number.isNaN(value.getTime()) ? "—" : new Intl.DateTimeFormat("de-DE", {
+        dateStyle: "medium",
+        timeStyle: "short"
+    }).format(value);
+};
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
     const r = await fetch(url, {
@@ -141,6 +156,15 @@ export default function Home() {
         return () => window.clearInterval(t)
     }, [pollScraper]);
     useEffect(() => {
+        const events = new EventSource("/api/v1/admin/events");
+        const refreshScraperStatus = () => { void pollScraper(); };
+        events.addEventListener("scraper-status", refreshScraperStatus);
+        return () => {
+            events.removeEventListener("scraper-status", refreshScraperStatus);
+            events.close();
+        };
+    }, [pollScraper]);
+    useEffect(() => {
         pollAwin();
         const t = window.setInterval(pollAwin, 3000);
         return () => window.clearInterval(t)
@@ -155,7 +179,7 @@ export default function Home() {
             <nav>{tabs.map(x => <button key={x.id} className={tab === x.id ? "nav-item active" : "nav-item"}
                                         onClick={() => setTab(x.id)}><span
                 className="nav-icon">{x.icon}</span>{x.label}{x.id === "scraper" && status?.scrapingRunning &&
-                <i className="nav-pulse"/>}</button>)}<Link href="/ebay/" className="nav-item nav-link"><span className="nav-icon">€</span>eBay</Link><Link href="/icecat/" className="nav-item nav-link"><span className="nav-icon">✦</span>Icecat Lab</Link></nav>
+                <i className="nav-pulse"/>}</button>)}<Link href="/ebay/" className="nav-item nav-link"><span className="nav-icon">€</span>eBay</Link><Link href="/icecat/" className="nav-item nav-link"><span className="nav-icon">✦</span>Icecat Lab</Link><Link href="/opendb/" className="nav-item nav-link"><span className="nav-icon">◌</span>OpenDB</Link></nav>
             <div className="sidebar-bottom">
                 <div className="api-status"><span
                     className={error ? "status-dot danger" : "status-dot"}/>{error ? "API offline" : "API verbunden"}
@@ -313,7 +337,7 @@ function Database() {
             value={type} onChange={e => setType(e.target.value)}>
             <option value="">Alle Typen</option>
             {types.map(x => <option key={x} value={x}>{TYPE_LABELS[x.toLowerCase()] || x}</option>)}</select>
-            <select value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name A–Z</option><option value="id">Neueste ID</option></select><button onClick={() => search()} disabled={loading}>{loading ? "Suche …" : "Suchen"}</button>
+            <select value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name A–Z</option><option value="detectedAt">Zuletzt erstmals erkannt</option><option value="id">Neueste ID</option></select><button onClick={() => search()} disabled={loading}>{loading ? "Suche …" : "Suchen"}</button>
         </div>
         {!searched ? <div className="empty">
             <div className="empty-icon">⌕</div>
@@ -351,7 +375,7 @@ function Database() {
 }
 
 function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => void }) {
-    const [msg, setMsg] = useState(""), [recentHardware, setRecentHardware] = useState<Hardware[]>([]), [cache, setCache] = useState<CacheOverview>();
+    const [msg, setMsg] = useState(""), [recentHardware, setRecentHardware] = useState<Hardware[]>([]), [cache, setCache] = useState<CacheOverview>(), [hardwareUpdateTick, setHardwareUpdateTick] = useState(0), [expandedCacheWebsites, setExpandedCacheWebsites] = useState<Set<string>>(new Set());
     const restart = async () => {
         try {
             const r = await api<{ message: string }>("/api/v1/admin/scraping/restart", {method: "POST"});
@@ -361,23 +385,48 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
             setMsg("Scraper läuft bereits oder konnte nicht gestartet werden.")
         }
     };
-    const progress = Math.round((status?.progress01 ?? 0) * 100);
+    const scraperStatuses = status?.scrapers || [];
+    const paginationReady = scraperStatuses.length > 0 && scraperStatuses.every(scraper => scraper.paginationKnown);
+    const knownTotal = scraperStatuses.reduce((sum, scraper) => sum + scraper.estimatedPages, 0);
+    const knownProcessed = scraperStatuses.reduce((sum, scraper) => sum + scraper.processedPages, 0);
+    const progress = paginationReady && knownTotal > 0 ? Math.min(100, Math.round(knownProcessed / knownTotal * 100)) : 0;
+    const estimatedDuration = paginationReady ? Math.max(...scraperStatuses.map(scraper => scraper.estimatedDurationSeconds), 0) : 0;
     const runningProcesses = status?.scrapers?.filter(x => x.running).length ?? 0;
-    const processedPages = status?.scrapers?.reduce((sum, x) => sum + x.processedPages, 0) ?? 0;
     const loadRecentHardware = useCallback(async () => {
         try {
-            const result = await api<SearchPage>("/api/v1/specs/search/page?page=0&size=5&sort=id");
+            const result = await api<SearchPage>("/api/v1/specs/search/page?page=0&size=5&sort=detectedAt");
             setRecentHardware(result.content);
         } catch { /* the main status indicator owns connectivity feedback */ }
     }, []);
     useEffect(() => { void loadRecentHardware(); }, [loadRecentHardware, status?.scrapingRunning, status?.lastFinishedAt]);
+    const loadCache = useCallback(() => api<CacheOverview>("/api/v1/admin/cache/overview").then(setCache).catch(() => undefined), []);
     useEffect(() => {
-        const load = () => api<CacheOverview>("/api/v1/admin/cache/overview").then(setCache).catch(() => undefined);
-        load();
-        const timer = window.setInterval(load, 15000);
+        const events = new EventSource("/api/v1/admin/hardware/events");
+        const refreshHardware = () => {
+            setHardwareUpdateTick(tick => tick + 1);
+            void loadRecentHardware();
+            void loadCache();
+        };
+        events.addEventListener("hardware-updated", refreshHardware);
+        return () => {
+            events.removeEventListener("hardware-updated", refreshHardware);
+            events.close();
+        };
+    }, [loadCache, loadRecentHardware]);
+    useEffect(() => {
+        loadCache();
+        const timer = window.setInterval(loadCache, 15000);
         return () => window.clearInterval(timer);
-    }, [status?.scrapingRunning]);
+    }, [loadCache, status?.scrapingRunning]);
     const display = (r: Hardware) => String(r.model || r.name || r.modelName || r.displayName || r.title || r.id || "Unbenannt");
+    const completedScrapers = scraperStatuses.filter(scraper => !scraper.running && Boolean(scraper.finishedAt));
+    const pausedScrapers = scraperStatuses.filter(scraper => scraper.phase === "PAUSED");
+    const waitingScrapers = scraperStatuses.filter(scraper => !scraper.running && !scraper.finishedAt && scraper.phase !== "PAUSED");
+    const activePaginationScrapers = scraperStatuses.filter(scraper => scraper.running && scraper.phase !== "DETAILS");
+    const activeDetailScrapers = scraperStatuses.filter(scraper => scraper.running && scraper.phase === "DETAILS");
+    const websiteStats = aggregateWebsiteStats(scraperStatuses);
+    const cacheWebsiteGroups = aggregateCacheWebsiteGroups(cache?.sources || []);
+    const scraperKey = (scraper: ScraperStatus) => `${scraper.baseUrl}-${scraper.id}`;
     return <section className="content">
         <div className="page-intro">
             <div><span className="kicker">INGESTION PIPELINE</span><h2>Scraper-Zentrale</h2><p>Überwache laufende Jobs
@@ -388,20 +437,20 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
         <div className="scraper-dashboard">
             <div className="scraper-card scraper-live-card">
                 <div className="scraper-card-top"><div className="scraper-state"><span className={status?.scrapingRunning ? "big-status active" : "big-status"}>{status?.scrapingRunning ? "↻" : "✓"}</span><div><span className="kicker">AKTUELLER STATUS</span><h3>{status?.scrapingRunning ? "Scraper läuft" : "Scraper ist bereit"}</h3><p>{status?.message || "Kein aktiver Lauf. Der nächste geplante Lauf wird automatisch ausgeführt."}</p></div></div><div className={status?.scrapingRunning ? "progress-ring active" : "progress-ring"} style={{"--progress": `${progress * 3.6}deg`} as React.CSSProperties}><span>{progress}%</span></div></div>
-                <div className="progress-meta"><span>Gesamtfortschritt</span><strong>{progress}%</strong></div><div className="progress"><span style={{width: `${progress}%`}}/></div>
-                <div className="scraper-kpis"><div><strong>{runningProcesses}</strong><small>aktive Quellen</small></div><div><strong>{num(processedPages)}</strong><small>Seiten verarbeitet</small></div><div><strong>{date(status?.lastFinishedAt)}</strong><small>letzter Abschluss</small></div></div>
+                <div className="progress-meta"><span>{paginationReady ? "Detail-Fortschritt" : "Pagination wird ermittelt"}</span><strong>{paginationReady ? `${progress}%` : "—"}</strong></div><div className={paginationReady ? "progress" : "progress indeterminate"}><span style={{width: `${progress}%`}}/></div>
+                <div className="scraper-kpis"><div><strong>{runningProcesses}</strong><small>aktive Quellen</small></div><div><strong>{paginationReady ? num(knownTotal) : "—"}</strong><small>Detailseiten gesamt</small></div><div><strong>{paginationReady ? formatDuration(estimatedDuration) : "—"}</strong><small>geschätzte Dauer</small></div></div>
             </div>
-            <div className="scraper-new-data panel"><div className="panel-head"><div><span className="kicker">FRISCH IM KATALOG</span><h3>Zuletzt erkannte Hardware</h3></div><span className="live"><span className="live-dot"/>Live</span></div><p className="panel-note">Die neuesten Einträge aus dem Katalog — nach der letzten ID sortiert.</p><div className="new-hardware-list">{recentHardware.map((item, i) => <div className="new-hardware" key={String(item.id ?? i)}><span className="new-hardware-index">{String(i + 1).padStart(2, "0")}</span><div><strong>{display(item)}</strong><small>{String(item.manufacturer || "Hersteller unbekannt")} · {String(item.specType || "Komponente")}</small></div><span className="new-tag">NEU</span></div>)}{!recentHardware.length && <div className="empty compact"><h3>Noch keine Einträge</h3><p>Nach dem ersten Lauf erscheinen neue Datensätze hier.</p></div>}</div></div>
+            <div className="scraper-new-data panel"><div className="panel-head"><div><span className="kicker">FRISCH IM KATALOG</span><h3>Zuletzt erkannte Hardware</h3></div><span className="live"><span className="live-dot"/>Live</span></div><p className="panel-note">Die neuesten Einträge — nach dem erstmaligen Erkennungszeitpunkt sortiert.</p><div className="new-hardware-list" key={hardwareUpdateTick}>{recentHardware.map((item, i) => <div className="new-hardware" key={String(item.id ?? i)}><span className="new-hardware-index">{String(i + 1).padStart(2, "0")}</span><div><strong>{display(item)}</strong><small>{String(item.manufacturer || "Hersteller unbekannt")} · {String(item.specType || "Komponente")} · {date(item.detectedAt)}</small></div><span className="new-tag">NEU</span></div>)}{!recentHardware.length && <div className="empty compact"><h3>Noch keine Einträge</h3><p>Nach dem ersten Lauf erscheinen neue Datensätze hier.</p></div>}</div></div>
         </div>
         {msg && <div className="alert">{msg}</div>}
         <div className="panel scraper-processes"><div className="panel-head"><div><span className="kicker">LIVE-PIPELINE</span><h3>Quellen &amp; Prozesse</h3></div><span className="muted">Update alle 3 Sekunden</span></div>
-            <div className="scraper-process-list">
-                {(status?.scrapers || []).map(scraper => <ScraperProcess key={scraper.id} scraper={scraper}/>)}</div>
+            <ScraperFlow paused={pausedScrapers} waiting={waitingScrapers} pagination={activePaginationScrapers} details={activeDetailScrapers} completed={completedScrapers} scraperKey={scraperKey}/>
             {!status?.scrapers?.length && <div className="empty compact"><h3>Noch keine Prozessdaten</h3><p>Die API liefert die einzelnen Scraper-Prozesse beim nächsten Lauf.</p></div>}
         </div>
+        <div className="panel scraper-active-sites"><div className="panel-head"><div><span className="kicker">QUELLEN-STATISTIK</span><h3>Ergebnis pro Website</h3></div><span className="muted">Aktueller Lauf</span></div><p className="panel-note">Technische Abruffehler werden separat gezählt und beeinflussen die Hardware-Trefferquote nicht.</p><div className="active-site-list">{websiteStats.map(site => { const notRecognized = Math.max(0, site.processed - site.recognized); return <div className="active-site" key={site.website}><span className={site.active ? "live-dot" : "status-dot"}/><div><strong>{site.website}</strong><small>{site.processes} {site.processes === 1 ? "Prozess" : "Prozesse"} · {num(site.processed)} verarbeitet</small><span>{num(site.recognized)} Hardware erkannt · {num(notRecognized)} nicht erkannt{site.unreachable ? ` · ${num(site.unreachable)} nicht erreichbar` : ""}</span></div></div>; })}{!websiteStats.length && <div className="empty compact"><h3>Noch keine Website-Statistik</h3><p>Die Quellen erscheinen hier, sobald ein Scraper-Lauf gestartet wurde.</p></div>}</div></div>
         <div className="panel scraper-cache"><div className="panel-head"><div><span className="kicker">DATEI-CACHE</span><h3>Erkannt vs. gecached</h3></div><span className="muted">Scan {date(cache?.scannedAt)}</span></div>
             <div className="scraper-kpis cache-kpis"><div><strong>{num(cache?.totalCatalogPages)}</strong><small>Pagination-Seiten</small></div><div><strong>{num(cache?.totalRecognizedProducts)}</strong><small>erkannte Produkte</small></div><div><strong>{num(cache?.totalDetailPages)}</strong><small>gecachte Detailseiten</small></div></div>
-            <div className="table-wrap cache-table"><table><thead><tr><th>Website</th><th>Kategorie</th><th>Cache-Dateien</th><th>Pagination</th><th>Erkannt</th><th>Details gecached</th><th>Zuletzt</th></tr></thead><tbody>{(cache?.sources || []).filter(source => source.paginationPages > 0 || source.detailPages > 0).map(source => <tr key={`${source.website}-${source.category}`}><td>{source.website}</td><td>{source.category}</td><td>{num(source.cacheFiles)}</td><td>{num(source.paginationPages)}</td><td>{num(source.recognizedProducts)}</td><td><strong>{num(source.detailPages)}</strong></td><td>{date(source.latestCachedAt)}</td></tr>)}</tbody></table>{!(cache?.sources || []).some(source => source.paginationPages > 0 || source.detailPages > 0) && <div className="empty compact"><h3>Noch keine relevanten Cache-Daten</h3><p>Angezeigt werden nur Quellen mit Pagination- oder Detailseiten.</p></div>}</div>
+            <div className="table-wrap cache-table"><table><thead><tr><th>Website</th><th>Kategorie</th><th>Cache-Dateien</th><th>Pagination</th><th>Erkannt</th><th>Details gecached</th><th>Zuletzt</th></tr></thead><tbody>{cacheWebsiteGroups.map(group => <Fragment key={group.website}><tr className="cache-website-row"><td><button className="cache-expand-button" onClick={() => setExpandedCacheWebsites(current => { const next = new Set(current); if (next.has(group.website)) next.delete(group.website); else next.add(group.website); return next; })} aria-expanded={expandedCacheWebsites.has(group.website)} aria-label={`${expandedCacheWebsites.has(group.website) ? "Kategorien von" : "Kategorien für"} ${group.website} ${expandedCacheWebsites.has(group.website) ? "ausblenden" : "anzeigen"}`}><span aria-hidden="true">{expandedCacheWebsites.has(group.website) ? "⌄" : "›"}</span>{group.website}</button></td><td><span className="cache-category-summary">{group.categories.length} {group.categories.length === 1 ? "Kategorie" : "Kategorien"}</span></td><td>{num(group.cacheFiles)}</td><td>{num(group.paginationPages)}</td><td>{num(group.recognizedProducts)}</td><td><strong>{num(group.detailPages)}</strong></td><td>{date(group.latestCachedAt)}</td></tr>{expandedCacheWebsites.has(group.website) && group.categories.map(source => <tr className="cache-category-row" key={`${source.website}-${source.category}`}><td><span className="cache-category-name">↳</span></td><td>{source.category}</td><td>{num(source.cacheFiles)}</td><td>{num(source.paginationPages)}</td><td>{num(source.recognizedProducts)}</td><td><strong>{num(source.detailPages)}</strong></td><td>{date(source.latestCachedAt)}</td></tr>)}</Fragment>)} </tbody></table>{!cacheWebsiteGroups.length && <div className="empty compact"><h3>Noch keine relevanten Cache-Daten</h3><p>Angezeigt werden nur Quellen mit Pagination- oder Detailseiten.</p></div>}</div>
         </div>
         <div className="panel scraper-health">
             <div className="panel-head"><h3>Fehlerbehandlung</h3><span className="muted">Live aus Backend-Status</span>
@@ -414,20 +463,153 @@ function Scraper({status, refresh}: { status?: BackendStatus; refresh: () => voi
     </section>
 };
 
-function ScraperProcess({scraper}: { scraper: ScraperStatus }) {
-    const progress = scraper.estimatedPages > 1
+function ScraperFlow({paused, waiting, pagination, details, completed, scraperKey}: { paused: ScraperStatus[]; waiting: ScraperStatus[]; pagination: ScraperStatus[]; details: ScraperStatus[]; completed: ScraperStatus[]; scraperKey: (scraper: ScraperStatus) => string }) {
+    const [expandedWebsites, setExpandedWebsites] = useState<Set<string>>(new Set());
+    const columns = [
+        {title: "Pausiert", subtitle: "Domain-Cooldown", tone: "paused" as const, scrapers: paused, empty: "Keine pausierten Domains"},
+        {title: "Wartend", subtitle: "Im Pool", tone: "waiting" as const, scrapers: waiting, empty: "Keine wartenden Jobs"},
+        {title: "Pagination", subtitle: "Seiten werden gefunden", tone: "active" as const, scrapers: pagination, empty: "Keine Pagination aktiv"},
+        {title: "Details", subtitle: "Hardware wird extrahiert", tone: "active" as const, scrapers: details, empty: "Keine Detailseite aktiv"},
+        {title: "Abgeschlossen", subtitle: "Für diesen Lauf fertig", tone: "completed" as const, scrapers: completed, empty: "Noch nichts abgeschlossen"},
+    ];
+    return <div className="scraper-flow" aria-label="Scraping Pipeline">
+        {columns.map((column, index) => <div className="scraper-flow-stage" key={column.title}>
+            <section className={`scraper-process-group ${column.tone}`}>
+                <div className="scraper-process-group-head"><div><h4>{column.title}</h4><small>{column.subtitle}</small></div><span>{column.scrapers.length}</span></div>
+                {column.scrapers.length ? <div className="scraper-website-list">{groupScrapersByWebsite(column.scrapers).map(group => {
+                    const key = column.title + ":" + group.website;
+                    const expanded = expandedWebsites.has(key);
+                    return <div className="scraper-website-card" key={key}>
+                        <button className="scraper-website-toggle" onClick={() => setExpandedWebsites(current => {
+                            const next = new Set(current);
+                            if (next.has(key)) next.delete(key); else next.add(key);
+                            return next;
+                        })} aria-expanded={expanded}>
+                            <span className="scraper-website-chevron">{expanded ? "⌄" : "›"}</span>
+                            <span className="scraper-website-name">{group.website}</span>
+                            <span className="scraper-website-count">{group.scrapers.length} {group.scrapers.length === 1 ? "Kategorie" : "Kategorien"}</span>
+                        </button>
+                        {expanded && <div className="scraper-website-details">
+                            <WebsiteScraperSummary scrapers={group.scrapers}/>
+                            {group.scrapers.map(scraper => <ScraperProcess key={scraperKey(scraper)} scraper={scraper} tone={column.tone}/>)}</div>}
+                    </div>;
+                })}</div> : <p className="scraper-process-empty">{column.empty}</p>}
+            </section>
+            {index < columns.length - 1 && <div className="scraper-flow-arrow" aria-hidden="true">→</div>}
+        </div>)}
+    </div>;
+}
+
+/** A roll-up of the category scrapers shown underneath an expanded website. */
+function WebsiteScraperSummary({scrapers}: { scrapers: ScraperStatus[] }) {
+    const processed = scrapers.reduce((sum, scraper) => sum + (scraper.processedPages ?? 0), 0);
+    const recognized = scrapers.reduce((sum, scraper) => sum + (scraper.recognizedPages ?? 0), 0);
+    const unreachable = scrapers.reduce((sum, scraper) => sum + (scraper.unreachablePages ?? 0), 0);
+    const rate = processed > 0 ? Math.round(recognized / processed * 100) : 0;
+    const running = scrapers.some(scraper => scraper.running);
+    return <div className="scraper-website-summary" aria-label="Website-Zusammenfassung">
+        <div className="scraper-website-summary-head"><span>{running ? "Website aktuell aktiv" : "Website-Zusammenfassung"}</span><strong>{rate}% Trefferquote</strong></div>
+        <div className="scraper-website-summary-metrics">
+            <span><strong>{num(processed)}</strong><small>verarbeitet</small></span>
+            <span><strong>{num(recognized)}</strong><small>Hardware erkannt</small></span>
+            <span><strong>{num(Math.max(0, processed - recognized))}</strong><small>nicht erkannt</small></span>
+            <span><strong>{num(unreachable)}</strong><small>nicht erreichbar</small></span>
+        </div>
+    </div>;
+}
+
+function groupScrapersByWebsite(scrapers: ScraperStatus[]) {
+    const groups = new Map<string, ScraperStatus[]>();
+    for (const scraper of scrapers) {
+        const website = scraper.baseUrl || scraper.id;
+        const current = groups.get(website) || [];
+        current.push(scraper);
+        groups.set(website, current);
+    }
+    return [...groups.entries()].map(([website, grouped]) => ({website, scrapers: grouped}));
+}
+
+function ScraperProcess({scraper, tone}: { scraper: ScraperStatus; tone: "completed" | "waiting" | "active" | "paused" }) {
+    const progress = scraper.paginationKnown && scraper.estimatedPages > 0
         ? Math.min(100, Math.round(scraper.processedPages / scraper.estimatedPages * 100))
-        : scraper.running ? 35 : 100;
-    return <div className={scraper.running ? "scraper-process active" : "scraper-process"}>
-        <span className={scraper.running ? "process-icon running" : "process-icon"}>{scraper.running ? "↻" : "✓"}</span>
+        : 0;
+    const icon = tone === "active" ? "↻" : tone === "completed" ? "✓" : tone === "paused" ? "Ⅱ" : "…";
+    const label = tone === "active" ? "Aktiv" : tone === "completed" ? "Abgeschlossen" : tone === "paused" ? "Pausiert" : "Wartend";
+    return <div className={`scraper-process ${tone}`}>
+        <span className={`process-icon ${tone === "active" ? "running" : tone === "paused" ? "paused" : ""}`}>{icon}</span>
         <div className="scraper-process-main">
-            <div className="scraper-process-title"><strong>{scraper.id}</strong><span className={scraper.running ? "badge running" : "badge"}>{scraper.running ? "Aktiv" : "Bereit"}</span></div>
+            <div className="scraper-process-title"><strong>{scraper.id}</strong><span className={tone === "active" ? "badge running" : tone === "paused" ? "badge paused" : "badge"}>{label}</span></div>
             <small className="scraper-site">{scraper.baseUrl}</small>
             <div className="scraper-current-url" title={scraper.currentUrl || scraper.message}>{scraper.currentUrl || scraper.message || "Wartet auf nächsten Lauf"}</div>
-            {scraper.running && <><div className="process-progress"><span style={{width: `${progress}%`}}/></div><small className="process-count">{num(scraper.processedPages)} Seiten verarbeitet{scraper.estimatedPages > 1 ? ` · Ziel ${num(scraper.estimatedPages)}` : ""}</small></>}
+            {tone === "active" && <><div className={scraper.paginationKnown ? "process-progress" : "process-progress indeterminate"}><span style={{width: `${progress}%`}}/></div><small className="process-count">{scraper.phase === "PAGINATION" ? `${num(scraper.paginationPagesFound)} Pagination-Seiten bisher gefunden …` : scraper.paginationKnown ? `${num(scraper.processedPages)} Detailseiten verarbeitet · ${recognitionSummary(scraper)} · Ziel ${num(scraper.estimatedPages)} · ca. ${formatDuration(scraper.estimatedDurationSeconds)}` : "Detailseiten werden vorbereitet …"}</small></>}
+            {tone === "completed" && <small className="process-count">{num(scraper.processedPages)} Detailseiten verarbeitet · {recognitionSummary(scraper)}{scraper.finishedAt ? ` · beendet ${date(scraper.finishedAt)}` : ""}</small>}
+            {tone === "paused" && <small className="process-count">Live-Anfragen angehalten · noch {formatRemaining(scraper.pausedUntil)}</small>}
             {scraper.lastError && <small className="process-error">{scraper.lastError}</small>}
         </div>
     </div>
+}
+
+function recognitionSummary(scraper: ScraperStatus) {
+    const recognized = scraper.recognizedPages ?? 0;
+    const rate = scraper.processedPages > 0 ? Math.round(recognized / scraper.processedPages * 100) : 0;
+    const unavailable = scraper.unreachablePages ?? 0;
+    return `${num(recognized)} Hardware erkannt · Trefferquote ${rate}%${unavailable ? ` · ${num(unavailable)} nicht erreichbar` : ""}`;
+}
+
+function aggregateWebsiteStats(scrapers: ScraperStatus[]): WebsiteScrapeStats[] {
+    const sites = new Map<string, WebsiteScrapeStats>();
+    for (const scraper of scrapers) {
+        const website = scraper.baseUrl || scraper.id;
+        const current = sites.get(website) || {website, processes: 0, processed: 0, recognized: 0, unreachable: 0, active: false};
+        current.processes++;
+        current.processed += scraper.processedPages;
+        current.recognized += scraper.recognizedPages ?? 0;
+        current.unreachable += scraper.unreachablePages ?? 0;
+        current.active ||= scraper.running;
+        sites.set(website, current);
+    }
+    return [...sites.values()].sort((a, b) => a.website.localeCompare(b.website, "de"));
+}
+
+function aggregateCacheWebsiteGroups(sources: CacheSource[]): CacheWebsiteGroup[] {
+    const groups = new Map<string, CacheWebsiteGroup>();
+    for (const source of sources) {
+        if (source.paginationPages <= 0 && source.detailPages <= 0) continue;
+        const current = groups.get(source.website) || {
+            website: source.website,
+            categories: [],
+            cacheFiles: 0,
+            paginationPages: 0,
+            recognizedProducts: 0,
+            detailPages: 0,
+            latestCachedAt: undefined,
+        };
+        current.categories.push(source);
+        current.cacheFiles += source.cacheFiles;
+        current.paginationPages += source.paginationPages;
+        current.recognizedProducts += source.recognizedProducts;
+        current.detailPages += source.detailPages;
+        if (!current.latestCachedAt || (source.latestCachedAt && new Date(source.latestCachedAt).getTime() > new Date(current.latestCachedAt).getTime())) {
+            current.latestCachedAt = source.latestCachedAt;
+        }
+        groups.set(source.website, current);
+    }
+    return [...groups.values()]
+        .map(group => ({...group, categories: group.categories.sort((a, b) => a.category.localeCompare(b.category, "de"))}))
+        .sort((a, b) => a.website.localeCompare(b.website, "de"));
+}
+
+function formatDuration(seconds: number) {
+    if (seconds < 60) return `${seconds} s`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+function formatRemaining(until?: string) {
+    if (!until) return "unbekannt";
+    const seconds = Math.max(0, Math.round((new Date(until).getTime() - Date.now()) / 1000));
+    return formatDuration(seconds);
 }
 
 function Awin({awin}: { awin?: AwinStatus }) {

@@ -10,8 +10,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.math.BigDecimal;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,8 +29,8 @@ import java.util.regex.Pattern;
  * das Produkt-Matching macht die {@code KleinanzeigenPriceService}.
  *
  * <p><b>Selector-Basis:</b> Die CSS-Selektoren unten spiegeln das aktuelle
- * Kleinanzeigen-Listings-DOM ({@code div.aditem}, {@code a.aditem-main},
- * {@code span.price--basic} …). Kleinanzeigen ändert das DOM regelmäßig – falls
+ * Kleinanzeigen-Listings-DOM (aktuell {@code article[data-adid]}, zuvor
+ * {@code div.aditem}). Kleinanzeigen ändert das DOM regelmäßig – falls
  * ein Run leere Resultate liefert, zuerst hier prüfen. Das ist die eine
  * Stellschraube für das Scraping.
  */
@@ -58,14 +56,25 @@ public class KleinanzeigenScraper {
         });
     }
 
+    private static final String CATEGORY_PATH = "/s-pc-zubehoer-software/";
+    private static final String CATEGORY_SUFFIX = "/k0c225";
+
     /**
-     * Baut die Kleinanzeigen-Such-URL für eine Freitext-Query (Kategorie "alle", k0).
-     * {@code px} = Seiten-Parameter (1-basiert), {@code an=on} = nur aktive Anzeigen.
+     * Baut die kategorisierte Kleinanzeigen-Such-URL für PC-Zubehör/Software.
+     * Das /s-{query}/k0.html-Routing liefert für diese Suche inzwischen HTTP 500;
+     * die Kategorie-Route entspricht dem aktuellen Kleinanzeigen-Frontend.
      */
     public static String buildUrl(String query, int page) {
-        String q = URLEncoder.encode(query, StandardCharsets.UTF_8);
+        String q = query == null ? "" : query.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{Alnum}]+", "-")
+                .replaceAll("^-|-$", "");
+        if (q.isBlank()) {
+            q = "pc";
+        }
         int p = Math.max(1, page);
-        return "https://" + DOMAIN + "/s-" + q + "/k0.html?an=on&px=" + p;
+        String pagination = p == 1 ? "" : "?page=" + p;
+        return "https://" + DOMAIN + CATEGORY_PATH + q + CATEGORY_SUFFIX + pagination;
     }
 
     /**
@@ -90,7 +99,7 @@ public class KleinanzeigenScraper {
                 break; // Challenge/Offline → nicht weiterdrehen
             }
 
-            if (doc == null || doc.selectFirst("div.aditem") == null) {
+            if (doc == null || doc.selectFirst("article[data-adid], div.aditem") == null) {
                 continue; // Challenge-/leere Seite
             }
 
@@ -106,7 +115,7 @@ public class KleinanzeigenScraper {
     /** Parst alle Anzeigen-Karten eines Listings-Dokuments. (Package-privat zum Testen.) */
     List<KleinanzeigenAd> parseAds(Document doc) {
         List<KleinanzeigenAd> out = new ArrayList<>();
-        for (Element ad : doc.select("div.aditem")) {
+        for (Element ad : doc.select("article[data-adid], div.aditem")) {
             try {
                 KleinanzeigenAd parsed = parseOne(ad);
                 if (parsed != null) {
@@ -120,7 +129,9 @@ public class KleinanzeigenScraper {
     }
 
     private KleinanzeigenAd parseOne(Element ad) {
-        Element main = ad.selectFirst("a.aditem-main");
+        // The legacy server-rendered page used div.aditem/a.aditem-main. The current
+        // Astro result page uses article[data-adid] and keeps the item URL in data-href.
+        Element main = ad.selectFirst("a.aditem-main, h3 a[href], a[href]");
 
         String adId = ad.attr("data-adid");
         if (adId.isBlank() && main != null) {
@@ -130,15 +141,18 @@ public class KleinanzeigenScraper {
             return null;
         }
 
-        Element titleEl = (main != null) ? main.selectFirst("h2") : ad.selectFirst("h2");
+        Element titleEl = ad.selectFirst("h3, h2");
         String title = (titleEl != null) ? titleEl.text() : "";
+        if (title.isBlank() && main != null) {
+            title = main.text();
+        }
         if (title.isBlank()) {
             return null;
         }
 
-        String url = (main != null && !main.absUrl("href").isBlank())
-                ? main.absUrl("href")
-                : main != null ? main.attr("href") : "";
+        String url = !ad.absUrl("data-href").isBlank() ? ad.absUrl("data-href")
+                : (main != null && !main.absUrl("href").isBlank())
+                ? main.absUrl("href") : main != null ? main.attr("href") : "";
 
         Element img = (main != null) ? main.selectFirst("img") : ad.selectFirst("img");
         String imageUrl = (img != null && !img.absUrl("src").isBlank()) ? img.absUrl("src") : null;
@@ -165,6 +179,14 @@ public class KleinanzeigenScraper {
         Element el = ad.selectFirst("span.price--basic");
         if (el == null) {
             el = ad.selectFirst("span.price--emphasized");
+        }
+        if (el == null) {
+            // Current Astro cards render the price as a regular <p>, without a stable
+            // semantic price class. The Euro marker keeps this fallback scoped to a price.
+            el = ad.select("p").stream()
+                    .filter(candidate -> candidate.text().contains("€"))
+                    .findFirst()
+                    .orElse(null);
         }
         String text = (el != null) ? el.text() : "";
         if (text.isBlank()) {

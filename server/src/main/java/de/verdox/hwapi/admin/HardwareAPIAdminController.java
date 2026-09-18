@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -21,12 +22,14 @@ public class HardwareAPIAdminController {
     private final AwinAdminService awinAdminService;
     private final HardwareBackupService backupService;
     private final CacheOverviewService cacheOverviewService;
+    private final HardwareLiveUpdateService liveUpdateService;
 
-    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService, HardwareBackupService backupService, CacheOverviewService cacheOverviewService) {
+    public HardwareAPIAdminController(HardwareAdminService adminService, AwinAdminService awinAdminService, HardwareBackupService backupService, CacheOverviewService cacheOverviewService, HardwareLiveUpdateService liveUpdateService) {
         this.adminService = adminService;
         this.awinAdminService = awinAdminService;
         this.backupService = backupService;
         this.cacheOverviewService = cacheOverviewService;
+        this.liveUpdateService = liveUpdateService;
     }
 
     /**
@@ -43,6 +46,16 @@ public class HardwareAPIAdminController {
     @GetMapping("/stats")
     public HardwareAdminDtos.BackendStats stats() {
         return adminService.getStats();
+    }
+
+    @GetMapping(value = "/hardware/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter hardwareEvents() {
+        return liveUpdateService.subscribe();
+    }
+
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter events() {
+        return liveUpdateService.subscribe();
     }
 
     @GetMapping("/cache/overview")

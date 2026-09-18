@@ -28,7 +28,12 @@ public class GPU extends HardwareSpec<GPU> {
 
     @Override
     public void sanitizeNumbers() {
-        this.model = getModel()
+        String modelBefore = getModel();
+        if (modelBefore == null || modelBefore.isBlank()) {
+            return;
+        }
+
+        String sanitized = modelBefore
                 .replace(getManufacturer(), "")
                 .replace(getGpuCanonicalName(), "")
                 .replace(((int) getVramGb()) + " GB", "")
@@ -37,6 +42,9 @@ public class GPU extends HardwareSpec<GPU> {
                 .replace("Radeon", "")
                 .replace("Arc", "")
                 .replace("Video Card", "");
+
+        // Never let lifecycle sanitization violate HardwareSpec.model @NotBlank.
+        this.model = sanitized.isBlank() ? modelBefore : sanitized;
     }
 
     @Override

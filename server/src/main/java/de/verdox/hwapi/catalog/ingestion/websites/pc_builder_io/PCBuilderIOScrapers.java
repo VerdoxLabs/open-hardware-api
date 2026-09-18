@@ -29,7 +29,7 @@ public class PCBuilderIOScrapers {
     public static WebsiteScraper create(HardwareSpecService service) {
         return new WebsiteScraper(service, "pc-builder.io")
                 .withStrategy(new PCBuilderIOStrategy())
-                .withMinLiveRequestInterval(Duration.ofSeconds(10))
+                .withMinLiveRequestInterval(Duration.ofSeconds(3))
                 .withChallengePageDetection(CHALLENGE_PREDICATE)
                 .withShouldSavePredicate(SHOULD_SAVE)
                 .withBaseLogic((scrapedSpecs, hardwareSpec) -> {

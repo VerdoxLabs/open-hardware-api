@@ -15,7 +15,9 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:pcparts}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 10
+      # Keep this aligned with the common configuration.  The API serves scrape jobs
+      # and HTTP traffic concurrently, so ten connections are insufficient.
+      maximum-pool-size: 30
       minimum-idle: 2
       connection-timeout: 30000
       validation-timeout: 5000

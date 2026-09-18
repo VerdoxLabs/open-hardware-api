@@ -94,4 +94,48 @@ class WebScraperApiClientTest {
 
         assertThat(requestBody.get()).contains("\"engine\":\"akamai\"");
     }
+
+    @Test
+    void forcesKleinanzeigenRequestsThroughBrowserEngine() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/v1/raw", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "<html><body>results</body></html>".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        WebScraperApiClient client = new WebScraperApiClient(
+                "http://localhost:" + server.getAddress().getPort(), "secret", "auto",
+                Duration.ofSeconds(5), new ObjectMapper());
+
+        client.fetchHtml("https://www.kleinanzeigen.de/s-AMD+Ryzen+7+7800X3D/k0.html?an=on&px=1");
+
+        assertThat(requestBody.get()).contains("\"engine\":\"cloudflare\"");
+    }
+
+    @Test
+    void encodesUnsafeCharactersAndUnicodeInProductUrls() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/v1/raw", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "<html><body>product</body></html>".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        WebScraperApiClient client = new WebScraperApiClient(
+                "http://localhost:" + server.getAddress().getPort(), "secret", "auto",
+                Duration.ofSeconds(5), new ObjectMapper());
+
+        client.fetchHtml("https://www.pc-kombo.com/us/product/gpu/4250812421364_EVGA GeForce GTX 1080 Ti K|NGP|N Gaming");
+
+        assertThat(requestBody.get()).contains("https://www.pc-kombo.com/us/product/gpu/4250812421364_EVGA%20GeForce%20GTX%201080%20Ti%20K%7CNGP%7CN%20Gaming");
+    }
 }
